@@ -1,111 +1,89 @@
 import streamlit as st
 from supabase_client import supabase
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-import time
-import math
+from datetime import datetime
+import pytz
+from dateutil.parser import isoparse
+
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def kitchen_screen(tenant_id):
-    # ----------------------------------
-    # Auto refresh every 15 seconds
-    # ----------------------------------
-    if "last_refresh" not in st.session_state:
-        st.session_state.last_refresh = time.time()
+    st.title("🍳 Kitchen Dashboard")
 
-    if time.time() - st.session_state.last_refresh > 15:
-        st.session_state.last_refresh = time.time()
-        st.experimental_rerun()
+    # Auto refresh every 10 seconds
+    st.experimental_rerun()
+    st.markdown(
+        "<meta http-equiv='refresh' content='10'>",
+        unsafe_allow_html=True
+    )
 
-    IST = ZoneInfo("Asia/Kolkata")
-
-    # ----------------------------------
-    # Tenant branding
-    # ----------------------------------
-    tenant = supabase.table("tenants") \
-        .select("name, logo_url") \
-        .eq("id", tenant_id) \
-        .single() \
-        .execute()
-
-    if tenant.data.get("logo_url"):
-        st.image(tenant.data["logo_url"], width=120)
-
-    st.markdown(f"## 🍳 {tenant.data['name']} – Kitchen")
-    st.divider()
-
-    # ----------------------------------
-    # Fetch ONLY open orders
-    # ----------------------------------
     orders = supabase.table("orders") \
-        .select("id, created_at, table_name, customer_name") \
+        .select("*") \
         .eq("tenant_id", tenant_id) \
         .eq("status", "open") \
         .order("created_at") \
         .execute()
 
     if not orders.data:
-        st.success("✅ No open kitchen orders")
+        st.info("No active orders")
         return
 
-    now = datetime.now(timezone.utc).astimezone(IST)
+    # Grid: 4 orders per row
+    cols = st.columns(4)
+    col_index = 0
 
-    # ----------------------------------
-    # Grid layout (4 per row)
-    # ----------------------------------
-    cols_per_row = 4
-    rows = math.ceil(len(orders.data) / cols_per_row)
+    for order in orders.data:
+        with cols[col_index]:
+            col_index = (col_index + 1) % 4
 
-    for r in range(rows):
-        cols = st.columns(cols_per_row)
+            # -----------------------------
+            # SAFE TIME PARSING
+            # -----------------------------
+            created_at_raw = order.get("created_at")
 
-        for c in range(cols_per_row):
-            index = r * cols_per_row + c
-            if index >= len(orders.data):
-                break
+            try:
+                created_utc = isoparse(created_at_raw)
+                created_ist = created_utc.astimezone(IST)
+                now_ist = datetime.now(IST)
+                minutes_pending = int((now_ist - created_ist).total_seconds() / 60)
+            except Exception:
+                created_ist = "—"
+                minutes_pending = "—"
 
-            order = orders.data[index]
+            st.markdown(
+                f"""
+                ### 🧾 Order #{order['id']}
+                **Table:** {order.get('table_name','—')}  
+                **Customer:** {order.get('customer_name','Guest')}  
 
-            created_ist = datetime.fromisoformat(
-                order["created_at"].replace("Z", "+00:00")
-            ).astimezone(IST)
-
-            pending_minutes = int(
-                (now - created_ist).total_seconds() // 60
+                ⏰ **Time:** {created_ist.strftime('%d %b %Y, %I:%M %p') if created_ist != '—' else '—'}  
+                ⏳ **Pending:** {minutes_pending} min  
+                """
             )
 
-            time_str = created_ist.strftime("%I:%M %p")
+            # -----------------------------
+            # ORDER ITEMS
+            # -----------------------------
+            items = supabase.table("order_items") \
+                .select("*") \
+                .eq("order_id", order["id"]) \
+                .execute()
 
-            table = order.get("table_name") or "—"
-            customer = order.get("customer_name") or "Guest"
-
-            # ----------------------------------
-            # Card color based on urgency
-            # ----------------------------------
-            if pending_minutes >= 15:
-                color = "🔴"
-            elif pending_minutes >= 7:
-                color = "🟡"
-            else:
-                color = "🟢"
-
-            with cols[c]:
-                st.markdown(
-                    f"""
-                    ### {color} Order #{order['id']}
-                    **Table:** {table}  
-                    **Customer:** {customer}  
-                    **Time:** {time_str} IST  
-                    **Pending:** {pending_minutes} min
-                    """
+            for item in items.data:
+                st.write(
+                    f"- {item['product_name']} × {item['quantity']}"
                 )
 
-                items = supabase.table("order_items") \
-                    .select("product_name, quantity") \
-                    .eq("order_id", order["id"]) \
+            # -----------------------------
+            # ACTION
+            # -----------------------------
+            if st.button(
+                "✅ Mark Prepared",
+                key=f"prep_{order['id']}"
+            ):
+                supabase.table("orders") \
+                    .update({"status": "prepared"}) \
+                    .eq("id", order["id"]) \
                     .execute()
 
-                for item in items.data:
-                    st.write(f"• {item['quantity']} × {item['product_name']}")
-
-                st.markdown("---")
+                st.rerun()
