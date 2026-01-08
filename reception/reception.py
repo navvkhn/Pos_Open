@@ -13,10 +13,30 @@ time.sleep(0.3)  # prevent rapid reruns hitting Supabase
 
 
 def reception_screen(tenant_id):
+    st.set_page_config(layout="wide")
     st.title("🧾 Reception / Cashier")
 
     # --------------------------------------------------
-    # 🔄 MANUAL REFRESH
+    # 🎨 MOBILE + DARK MODE SAFE CSS
+    # --------------------------------------------------
+    st.markdown("""
+    <style>
+    .order-box {
+        background-color: var(--secondary-background-color);
+        border: 1px solid rgba(128,128,128,0.4);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 14px;
+    }
+    button {
+        min-height: 48px;
+        font-size: 16px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # --------------------------------------------------
+    # 🔄 REFRESH
     # --------------------------------------------------
     if st.button("🔄 Refresh"):
         st.rerun()
@@ -30,7 +50,7 @@ def reception_screen(tenant_id):
     today_utc = today_ist.astimezone(pytz.utc)
 
     # --------------------------------------------------
-    # 📊 TOP DASHBOARD METRICS (SAFE)
+    # 📊 TOP METRICS
     # --------------------------------------------------
     try:
         unpaid = supabase.table("orders") \
@@ -68,35 +88,30 @@ def reception_screen(tenant_id):
         return
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("💳 Unpaid Orders", unpaid.count)
-    c2.metric("🕒 Open Orders", open_orders.count)
+    c1.metric("💳 Unpaid", unpaid.count)
+    c2.metric("🕒 Open", open_orders.count)
     c3.metric("🍳 Prepared", prepared.count)
-    c4.metric("₹ Today Revenue", f"{today_revenue:.2f}")
+    c4.metric("₹ Revenue", f"{today_revenue:.2f}")
 
     st.divider()
 
     # --------------------------------------------------
-    # 🧾 FETCH TODAY'S ORDERS (JOIN ITEMS – SINGLE CALL)
+    # 🧾 FETCH TODAY'S ORDERS
     # --------------------------------------------------
-    try:
-        orders = supabase.table("orders") \
-            .select("""
-                *,
-                order_items (
-                    product_name
-                )
-            """) \
-            .eq("tenant_id", tenant_id) \
-            .gte("created_at", today_utc.isoformat()) \
-            .order("created_at", desc=True) \
-            .execute()
-
-    except Exception:
-        st.error("⚠️ Unable to load orders. Please refresh.")
-        return
+    orders = supabase.table("orders") \
+        .select("""
+            *,
+            order_items (
+                product_name
+            )
+        """) \
+        .eq("tenant_id", tenant_id) \
+        .gte("created_at", today_utc.isoformat()) \
+        .order("created_at", desc=True) \
+        .execute()
 
     if not orders.data:
-        st.info("No orders for today")
+        st.info("No orders today")
         return
 
     # --------------------------------------------------
@@ -112,9 +127,7 @@ def reception_screen(tenant_id):
         discount_percent_db = float(order.get("discount_percent") or 0)
         subtotal = total + discount_amount_db
 
-        # -------------------------
-        # ITEM LABEL (NO EXTRA QUERY)
-        # -------------------------
+        # Item label
         items = order.get("order_items") or []
         if len(items) == 1:
             item_label = items[0]["product_name"]
@@ -123,9 +136,7 @@ def reception_screen(tenant_id):
         else:
             item_label = "—"
 
-        # -------------------------
-        # CREATED TIME (IST)
-        # -------------------------
+        # Created time IST
         try:
             created_ist = (
                 datetime.fromisoformat(
@@ -137,63 +148,53 @@ def reception_screen(tenant_id):
         except Exception:
             created_ist = "—"
 
-        # -------------------------
-        # 🔴 UNPAID HIGHLIGHT
-        # -------------------------
-        header_prefix = "🔴 " if payment_status == "pending" else ""
+        unpaid_flag = "🔴 " if payment_status == "pending" else ""
 
         header = (
-            f"{header_prefix}"
-            f"Order #{order_id} | "
-            f"{item_label} | "
-            f"₹{total:.2f} | "
-            f"{order.get('customer_name','Guest')} | "
-            f"{created_ist}"
+            f"{unpaid_flag}"
+            f"Order #{order_id} | ₹{total:.2f} | "
+            f"{order.get('customer_name','Guest')} | {created_ist}"
         )
 
-        with st.expander(header):
+        with st.expander(header, expanded=False):
             is_open = status == "open"
 
             if not is_open:
-                st.warning("🔒 Order closed. Editing locked.")
+                st.warning("🔒 Order closed. Editing disabled.")
+
+            st.markdown("<div class='order-box'>", unsafe_allow_html=True)
 
             # -------------------------
-            # TABLE NAME
+            # TABLE NAME (FIXED)
             # -------------------------
-            st.text_input(
-                "Table Name / Number",
+            table_name = st.text_input(
+                "🍽 Table Name / Number",
                 value=order.get("table_name") or "",
                 disabled=not is_open,
                 key=f"table_{order_id}"
             )
 
-            st.divider()
-
             # -------------------------
             # DISCOUNT (ONLY IF OPEN)
             # -------------------------
             if is_open:
-                st.subheader("🏷 Adjust Discount")
+                st.subheader("🏷 Discount")
 
-                col1, col2 = st.columns(2)
+                discount_percent_input = st.number_input(
+                    "Discount %",
+                    0.0, 100.0,
+                    value=discount_percent_db,
+                    step=1.0,
+                    key=f"dp_{order_id}"
+                )
 
-                with col1:
-                    discount_percent_input = st.number_input(
-                        "Discount %",
-                        0.0, 100.0,
-                        value=discount_percent_db,
-                        step=1.0,
-                        key=f"dp_{order_id}"
-                    )
-
-                with col2:
-                    discount_amount_input = st.number_input(
-                        "Discount Amount (₹)",
-                        0.0, subtotal,
-                        value=discount_amount_db,
-                        step=1.0,
-                        key=f"da_{order_id}"
-                    )
+                discount_amount_input = st.number_input(
+                    "Discount ₹",
+                    0.0, subtotal,
+                    value=discount_amount_db,
+                    step=1.0,
+                    key=f"da_{order_id}"
+                )
 
                 if discount_percent_input > 0:
                     final_discount_amount = round(
@@ -214,17 +215,18 @@ def reception_screen(tenant_id):
                 st.markdown(
                     f"""
                     **Subtotal:** ₹{subtotal:.2f}  
-                    **Discount:** ₹{final_discount_amount:.2f} ({final_discount_percent:.2f}%)  
-                    **Final Total:** ₹{final_total:.2f}
+                    **Discount:** ₹{final_discount_amount:.2f}  
+                    **Total:** ₹{final_total:.2f}
                     """
                 )
 
                 # -------------------------
-                # SAVE BILL (DB GUARDED)
+                # 💾 SAVE BILL (FIXED)
                 # -------------------------
-                if st.button("💾 Save Bill", key=f"save_{order_id}"):
+                if st.button("💾 Save Bill", key=f"save_{order_id}", use_container_width=True):
                     supabase.table("orders") \
                         .update({
+                            "table_name": table_name,   # ✅ FIX
                             "discount_percent": float(final_discount_percent),
                             "discount_amount": float(final_discount_amount),
                             "total": float(final_total)
@@ -233,17 +235,17 @@ def reception_screen(tenant_id):
                         .eq("status", "open") \
                         .execute()
 
-                    st.success("Bill updated")
+                    st.success("✅ Bill updated")
                     st.rerun()
 
             st.divider()
 
             # -------------------------
-            # PAYMENT & CLOSE (ONLY IF OPEN)
+            # PAYMENT & CLOSE
             # -------------------------
             if is_open:
                 if payment_status == "pending":
-                    if st.button("✅ Mark Paid", key=f"paid_{order_id}"):
+                    if st.button("✅ Mark Paid", key=f"paid_{order_id}", use_container_width=True):
                         supabase.table("orders") \
                             .update({"payment_status": "paid"}) \
                             .eq("id", order_id) \
@@ -251,10 +253,12 @@ def reception_screen(tenant_id):
                             .execute()
                         st.rerun()
 
-                if st.button("🚫 Close Order", key=f"close_{order_id}"):
+                if st.button("🚫 Close Order", key=f"close_{order_id}", use_container_width=True):
                     supabase.table("orders") \
                         .update({"status": "completed"}) \
                         .eq("id", order_id) \
                         .eq("status", "open") \
                         .execute()
                     st.rerun()
+
+            st.markdown("</div>", unsafe_allow_html=True)
