@@ -65,7 +65,7 @@ def reception_screen(tenant_id):
     st.divider()
 
     # --------------------------------------------------
-    # 🧾 FETCH TODAY ORDERS
+    # 🧾 FETCH TODAY ORDERS + ITEMS
     # --------------------------------------------------
     orders = supabase.table("orders") \
         .select("""
@@ -87,7 +87,7 @@ def reception_screen(tenant_id):
         return
 
     # --------------------------------------------------
-    # 📦 FETCH PRODUCTS (ONCE)
+    # 📦 PRODUCTS (FOR ADDING ITEMS)
     # --------------------------------------------------
     products = supabase.table("products") \
         .select("name, price") \
@@ -108,19 +108,21 @@ def reception_screen(tenant_id):
         order_id = order["id"]
         order_no = order.get("order_number", "—")
         is_open = order.get("status") == "open"
-        total = float(order.get("total") or 0)
 
-        header = f"Order #{order_no} | ₹{total:.2f}"
+        discount_percent_db = float(order.get("discount_percent") or 0)
+        discount_amount_db = float(order.get("discount_amount") or 0)
+
+        header = f"Order #{order_no}"
 
         with st.expander(header):
             st.markdown("<div class='order-box'>", unsafe_allow_html=True)
 
             # --------------------------------------------------
-            # 🧾 EXISTING ITEMS
+            # 🧾 ITEMS
             # --------------------------------------------------
             st.subheader("🧾 Items")
 
-            items_total = 0.0
+            subtotal = 0.0
 
             for item in order.get("order_items", []):
                 cols = st.columns([4, 1, 1])
@@ -130,7 +132,7 @@ def reception_screen(tenant_id):
                 )
 
                 cols[1].write(f"₹{item['price']:.2f}")
-                items_total += float(item["price"])
+                subtotal += float(item["price"])
 
                 if is_open:
                     if cols[2].button("❌", key=f"del_{item['id']}"):
@@ -141,7 +143,7 @@ def reception_screen(tenant_id):
                         st.rerun()
 
             # --------------------------------------------------
-            # ➕ ADD NEW ITEM
+            # ➕ ADD ITEM
             # --------------------------------------------------
             if is_open and product_map:
                 st.divider()
@@ -172,21 +174,87 @@ def reception_screen(tenant_id):
                         "price": price
                     }).execute()
 
-                    # 🔁 Update order total
-                    new_total = items_total + price
-
-                    supabase.table("orders") \
-                        .update({"total": new_total}) \
-                        .eq("id", order_id) \
-                        .execute()
-
                     st.rerun()
 
             # --------------------------------------------------
-            # 💰 TOTAL (LIVE)
+            # 🏷 DISCOUNT
             # --------------------------------------------------
             st.divider()
-            st.markdown(f"### 💰 Total: ₹{items_total:.2f}")
+            st.subheader("🏷 Discount")
+
+            if is_open:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    discount_percent_input = st.number_input(
+                        "Discount %",
+                        0.0, 100.0,
+                        value=discount_percent_db,
+                        step=1.0,
+                        key=f"dp_{order_id}"
+                    )
+
+                with col2:
+                    discount_amount_input = st.number_input(
+                        "Discount ₹",
+                        0.0, subtotal,
+                        value=discount_amount_db,
+                        step=1.0,
+                        key=f"da_{order_id}"
+                    )
+            else:
+                discount_percent_input = discount_percent_db
+                discount_amount_input = discount_amount_db
+
+            # --------------------------------------------------
+            # 🧮 CALCULATION
+            # --------------------------------------------------
+            if discount_percent_input > 0:
+                final_discount_amount = round(
+                    subtotal * discount_percent_input / 100, 2
+                )
+                final_discount_percent = discount_percent_input
+            elif discount_amount_input > 0:
+                final_discount_amount = discount_amount_input
+                final_discount_percent = round(
+                    (final_discount_amount / subtotal) * 100, 2
+                ) if subtotal else 0
+            else:
+                final_discount_amount = 0.0
+                final_discount_percent = 0.0
+
+            final_total = round(subtotal - final_discount_amount, 2)
+
+            # --------------------------------------------------
+            # 💰 SUMMARY
+            # --------------------------------------------------
+            st.markdown(
+                f"""
+                **Subtotal:** ₹{subtotal:.2f}  
+                **Discount:** ₹{final_discount_amount:.2f} ({final_discount_percent:.2f}%)  
+                **Total:** ₹{final_total:.2f}
+                """
+            )
+
+            # --------------------------------------------------
+            # 💾 SAVE BILL
+            # --------------------------------------------------
+            if is_open:
+                if st.button("💾 Save Bill", key=f"save_{order_id}", use_container_width=True):
+                    supabase.table("orders") \
+                        .update({
+                            "discount_percent": float(final_discount_percent),
+                            "discount_amount": float(final_discount_amount),
+                            "total": float(final_total)
+                        }) \
+                        .eq("id", order_id) \
+                        .eq("status", "open") \
+                        .execute()
+
+                    st.success("✅ Bill updated")
+                    st.rerun()
+
+            st.divider()
 
             # --------------------------------------------------
             # CLOSE ORDER
