@@ -74,12 +74,12 @@ def generate_bill_pdf(order_id):
     # Cafe Name
     # --------------------------------------------------
     title_style = ParagraphStyle(
-        "Title",
-        fontSize=18,
-        alignment=1,
-        textColor=primary_color,
-        spaceAfter=8
-    )
+    "Title",
+    fontSize=17,
+    alignment=1,
+    textColor=primary_color,
+    spaceAfter=6
+)
     elements.append(Paragraph(f"<b>{tenant.data['name']}</b>", title_style))
 
     meta_style = ParagraphStyle(
@@ -106,12 +106,13 @@ def generate_bill_pdf(order_id):
 
     table = Table(table_data, colWidths=[90 * mm, 25 * mm, 35 * mm])
     table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.8, primary_color),
-        ("BACKGROUND", (0, 0), (-1, 0), accent_color),
-        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-        ("TOPPADDING", (0, 0), (-1, 0), 8),
+    ("GRID", (0, 0), (-1, -1), 0.6, primary_color),
+    ("BACKGROUND", (0, 0), (-1, 0), primary_color),
+    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+    ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+    ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+    ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+    ("TOPPADDING", (0, 0), (-1, 0), 10),
     ]))
 
     elements.append(table)
@@ -131,10 +132,10 @@ def generate_bill_pdf(order_id):
 
     totals_table = Table(totals_data, colWidths=[115 * mm, 35 * mm])
     totals_table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.8, primary_color),
-        ("BACKGROUND", (-1, -1), (-1, -1), accent_color),
-        ("FONT", (-1, -1), (-1, -1), "Helvetica-Bold"),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+    ("GRID", (0, 0), (-1, -1), 0.6, primary_color),
+    ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+    ("FONT", (0, -1), (-1, -1), "Helvetica-Bold"),
+    ("TEXTCOLOR", (0, -1), (-1, -1), primary_color),
     ]))
 
     elements.append(totals_table)
