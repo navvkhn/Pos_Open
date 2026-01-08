@@ -1,27 +1,28 @@
 import streamlit as st
 from supabase_client import supabase
-primary_color = st.color_picker(
-    "Primary Brand Color",
-    value=tenant.data.get("primary_color", "#000000")
-)
 
-accent_color = st.color_picker(
-    "Accent Color",
-    value=tenant.data.get("accent_color", "#444444")
-)
 
 def settings(tenant_id):
     st.title("🏷 Cafe Branding & Payments")
 
+    # ----------------------------------
+    # Fetch tenant
+    # ----------------------------------
     tenant = supabase.table("tenants") \
         .select("*") \
         .eq("id", tenant_id) \
         .single() \
         .execute()
 
+    # ----------------------------------
+    # Uploads
+    # ----------------------------------
     logo = st.file_uploader("Cafe Logo", type=["png", "jpg"])
     upi_qr = st.file_uploader("UPI QR Code", type=["png", "jpg"])
 
+    # ----------------------------------
+    # Text settings
+    # ----------------------------------
     address = st.text_area(
         "Cafe Address",
         value=tenant.data.get("address", "")
@@ -36,27 +37,33 @@ def settings(tenant_id):
         "Instagram Handle (without @)",
         value=tenant.data.get("instagram_handle", "")
     )
+
+    # ----------------------------------
+    # Branding colors (CORRECT PLACE)
+    # ----------------------------------
     primary_color = st.color_picker(
-    "Primary Brand Color",
-    value=tenant.data.get("primary_color", "#000000")
-)
+        "Primary Brand Color",
+        value=tenant.data.get("primary_color", "#000000")
+    )
 
-accent_color = st.color_picker(
-    "Accent Brand Color",
-    value=tenant.data.get("accent_color", "#444444")
-)
+    accent_color = st.color_picker(
+        "Accent Brand Color",
+        value=tenant.data.get("accent_color", "#444444")
+    )
 
-
+    # ----------------------------------
+    # Save settings
+    # ----------------------------------
     if st.button("Save Settings"):
-    updates = {
-        "address": address,
-        "contact": contact,
-        "instagram_handle": instagram,
-        "primary_color": primary_color,
-        "accent_color": accent_color
-    }
+        updates = {
+            "address": address,
+            "contact": contact,
+            "instagram_handle": instagram,
+            "primary_color": primary_color,
+            "accent_color": accent_color
+        }
 
-
+        # ---- Logo upload ----
         if logo:
             logo_path = f"{tenant_id}/logo.png"
             supabase.storage.from_("branding").upload(
@@ -68,6 +75,7 @@ accent_color = st.color_picker(
                 .get_public_url(logo_path)
             )
 
+        # ---- UPI QR upload ----
         if upi_qr:
             qr_path = f"{tenant_id}/upi_qr.png"
             supabase.storage.from_("branding").upload(
