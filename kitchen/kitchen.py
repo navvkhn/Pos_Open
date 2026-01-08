@@ -5,33 +5,37 @@ from datetime import datetime, timezone
 def kitchen_screen(tenant_id):
     st.title("🍳 Kitchen Orders")
 
-    # -----------------------------
-    # Auto refresh every 10 seconds
-    # -----------------------------
+    # 🔄 Auto refresh every 10 seconds
     st.autorefresh(interval=10_000, key="kitchen_refresh")
 
+    # 🔒 ONLY OPEN ORDERS
     orders = supabase.table("orders") \
-        .select("id, created_at") \
+        .select("id, created_at, status") \
         .eq("tenant_id", tenant_id) \
         .eq("status", "open") \
         .order("created_at") \
         .execute()
 
     if not orders.data:
-        st.success("✅ No pending orders")
+        st.success("✅ No open kitchen orders")
         return
 
+    now = datetime.now(timezone.utc)
+
     for order in orders.data:
+        # Safety check (extra guard)
+        if order["status"] != "open":
+            continue
+
         created_at = datetime.fromisoformat(
             order["created_at"].replace("Z", "+00:00")
         )
 
-        now = datetime.now(timezone.utc)
-        pending_minutes = int((now - created_at).total_seconds() / 60)
+        pending_minutes = int(
+            (now - created_at).total_seconds() / 60
+        )
 
-        # -----------------------------
-        # Visual priority indicator
-        # -----------------------------
+        # ⏱ Priority indicator
         if pending_minutes >= 15:
             st.error(f"🔥 Order #{order['id']} — Pending {pending_minutes} min")
         elif pending_minutes >= 7:
@@ -39,6 +43,7 @@ def kitchen_screen(tenant_id):
         else:
             st.info(f"🕒 Order #{order['id']} — Pending {pending_minutes} min")
 
+        # 🧾 Order items
         items = supabase.table("order_items") \
             .select("*") \
             .eq("order_id", order["id"]) \
