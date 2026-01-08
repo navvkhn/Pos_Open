@@ -1,42 +1,53 @@
 import streamlit as st
-from db import SessionLocal
-from models import User, Tenant
+from supabase_client import supabase
 from passlib.hash import pbkdf2_sha256
 from .signup import signup
 
 def login():
-    st.title("🔐 Login")
+    st.title("🔐 Superscale POS")
 
     tab1, tab2 = st.tabs(["Login", "Signup"])
 
     with tab1:
-        tenant_name = st.text_input("Restaurant Name", key="login_restaurant")
+        restaurant = st.text_input("Restaurant Name", key="login_restaurant")
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
 
         if st.button("Login"):
-            db = SessionLocal()
-            tenant = db.query(Tenant).filter(Tenant.name == tenant_name).first()
+            tenant = supabase.table("tenants") \
+                .select("id,name") \
+                .eq("name", restaurant) \
+                .execute()
 
-            if not tenant:
+            if not tenant.data:
                 st.error("Restaurant not found")
                 return
 
-            user = db.query(User).filter(
-                User.username == username,
-                User.tenant_id == tenant.id
-            ).first()
+            tenant_id = tenant.data[0]["id"]
 
-            if user and pbkdf2_sha256.verify(password, user.password):
-                st.session_state.user = {
-                    "username": username,
-                    "role": user.role,
-                    "tenant_id": tenant.id,
-                    "tenant": tenant.name
-                }
-                st.rerun()
-            else:
+            user = supabase.table("users") \
+                .select("*") \
+                .eq("tenant_id", tenant_id) \
+                .eq("username", username) \
+                .execute()
+
+            if not user.data:
                 st.error("Invalid credentials")
+                return
+
+            if not pbkdf2_sha256.verify(password, user.data[0]["password"]):
+                st.error("Invalid credentials")
+                return
+
+            st.session_state.user = {
+                "tenant_id": tenant_id,
+                "tenant": restaurant,
+                "username": username,
+                "role": user.data[0]["role"]
+            }
+
+            st.success("Logged in")
+            st.rerun()
 
     with tab2:
         signup()
