@@ -12,7 +12,7 @@ def reception_screen(tenant_id):
     st.title("🧾 Reception / Cashier")
 
     # --------------------------------------------------
-    # 🎨 MOBILE SAFE CSS
+    # 🎨 MOBILE + DARK MODE SAFE CSS
     # --------------------------------------------------
     st.markdown("""
     <style>
@@ -34,7 +34,7 @@ def reception_screen(tenant_id):
         st.rerun()
 
     # --------------------------------------------------
-    # 📅 TODAY RANGE
+    # 📅 TODAY RANGE (IST → UTC)
     # --------------------------------------------------
     today_ist = datetime.now(IST).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -106,7 +106,7 @@ def reception_screen(tenant_id):
     # --------------------------------------------------
     for order in orders.data:
         order_id = order["id"]
-        order_no = order.get("order_number", "—")
+        order_no = order.get("order_number", order_id)
         is_open = order.get("status") == "open"
 
         discount_percent_db = float(order.get("discount_percent") or 0)
@@ -116,6 +116,18 @@ def reception_screen(tenant_id):
 
         with st.expander(header):
             st.markdown("<div class='order-box'>", unsafe_allow_html=True)
+
+            # --------------------------------------------------
+            # 🍽 TABLE NUMBER (RESTORED ✅)
+            # --------------------------------------------------
+            table_name = st.text_input(
+                "🍽 Table Number / Name",
+                value=order.get("table_name") or "",
+                disabled=not is_open,
+                key=f"table_{order_id}"
+            )
+
+            st.divider()
 
             # --------------------------------------------------
             # 🧾 ITEMS
@@ -225,9 +237,6 @@ def reception_screen(tenant_id):
 
             final_total = round(subtotal - final_discount_amount, 2)
 
-            # --------------------------------------------------
-            # 💰 SUMMARY
-            # --------------------------------------------------
             st.markdown(
                 f"""
                 **Subtotal:** ₹{subtotal:.2f}  
@@ -237,12 +246,13 @@ def reception_screen(tenant_id):
             )
 
             # --------------------------------------------------
-            # 💾 SAVE BILL
+            # 💾 SAVE BILL (TABLE + DISCOUNT + TOTAL)
             # --------------------------------------------------
             if is_open:
                 if st.button("💾 Save Bill", key=f"save_{order_id}", use_container_width=True):
                     supabase.table("orders") \
                         .update({
+                            "table_name": table_name,  # ✅ FIXED
                             "discount_percent": float(final_discount_percent),
                             "discount_amount": float(final_discount_amount),
                             "total": float(final_total)
@@ -257,7 +267,7 @@ def reception_screen(tenant_id):
             st.divider()
 
             # --------------------------------------------------
-            # CLOSE ORDER
+            # 🚫 CLOSE ORDER
             # --------------------------------------------------
             if is_open:
                 if st.button("🚫 Close Order", key=f"close_{order_id}", use_container_width=True):
