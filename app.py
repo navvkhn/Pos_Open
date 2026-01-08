@@ -16,9 +16,13 @@ from supabase_client import supabase
 
 
 # --------------------------------------------------
-# App config
+# App config (DEFAULT BEFORE LOGIN)
 # --------------------------------------------------
-st.set_page_config(page_title="Superscale POS", layout="wide")
+st.set_page_config(
+    page_title="Superscale POS",
+    page_icon="🍽️",
+    layout="wide"
+)
 
 APP_URL = st.secrets.get(
     "APP_URL",
@@ -41,10 +45,10 @@ if "pay" in query:
     payment_page(int(query["pay"]))
     st.stop()
 
-# 3️⃣ Kitchen screen (PUBLIC, NO LOGIN)
+# 3️⃣ Kitchen screen (PUBLIC)
 if "kitchen" in query:
     tenant = supabase.table("tenants") \
-        .select("id") \
+        .select("id, name, logo_url") \
         .eq("name", query["kitchen"]) \
         .single() \
         .execute()
@@ -66,29 +70,75 @@ else:
     tenant_id = st.session_state.user["tenant_id"]
     tenant_name = st.session_state.user["tenant"]
 
-    # ---- SIDEBAR HEADER ----
-    st.sidebar.title(tenant_name)
+    # --------------------------------------------------
+    # FETCH TENANT (FOR LOGO)
+    # --------------------------------------------------
+    tenant = supabase.table("tenants") \
+        .select("logo_url") \
+        .eq("id", tenant_id) \
+        .single() \
+        .execute()
 
-    # ---- QR MENU ----
+    logo_url = tenant.data.get("logo_url")
+
+    # --------------------------------------------------
+    # SIDEBAR HEADER (LOGO + NAME)
+    # --------------------------------------------------
+    if logo_url:
+        st.sidebar.image(logo_url, width=120)
+
+    st.sidebar.markdown(f"### {tenant_name}")
+
+    # --------------------------------------------------
+    # LOGOUT
+    # --------------------------------------------------
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.clear()
+        st.query_params.clear()
+        st.rerun()
+
+    st.sidebar.divider()
+
+    # --------------------------------------------------
+    # QR MENU
+    # --------------------------------------------------
     with st.sidebar.expander("📱 Customer QR Menu"):
         menu_url = f"{APP_URL}/?menu={tenant_name.replace(' ', '%20')}"
         qr_img = generate_qr(menu_url)
         st.image(qr_img, caption="Scan to open menu")
         st.code(menu_url)
 
-    # ---- KITCHEN URL (PUBLIC) ----
+    # --------------------------------------------------
+    # KITCHEN URL (PUBLIC)
+    # --------------------------------------------------
     with st.sidebar.expander("🍳 Kitchen Screen"):
         kitchen_url = f"{APP_URL}/?kitchen={tenant_name.replace(' ', '%20')}"
         st.code(kitchen_url)
-        st.caption("Open this on kitchen tablet / screen")
+        st.caption("Open on kitchen tablet / TV")
 
-    # ---- MAIN NAVIGATION ----
+    st.sidebar.divider()
+
+    # --------------------------------------------------
+    # MAIN NAVIGATION
+    # --------------------------------------------------
     page = st.sidebar.selectbox(
         "Menu",
         ["Products", "Reports", "Reception", "Settings"]
     )
 
-    # ---- PAGE ROUTING ----
+    # --------------------------------------------------
+    # PAGE HEADER (LOGO ON PAGE)
+    # --------------------------------------------------
+    if logo_url:
+        st.image(logo_url, width=100)
+
+    st.title(tenant_name)
+
+    st.divider()
+
+    # --------------------------------------------------
+    # PAGE ROUTING
+    # --------------------------------------------------
     if page == "Products":
         products(tenant_id)
 
