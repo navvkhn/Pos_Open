@@ -36,13 +36,26 @@ def settings(tenant_id):
         "Instagram Handle (without @)",
         value=tenant.data.get("instagram_handle", "")
     )
+    primary_color = st.color_picker(
+    "Primary Brand Color",
+    value=tenant.data.get("primary_color", "#000000")
+)
+
+accent_color = st.color_picker(
+    "Accent Brand Color",
+    value=tenant.data.get("accent_color", "#444444")
+)
+
 
     if st.button("Save Settings"):
-        updates = {
-            "address": address,
-            "contact": contact,
-            "instagram_handle": instagram
-        }
+    updates = {
+        "address": address,
+        "contact": contact,
+        "instagram_handle": instagram,
+        "primary_color": primary_color,
+        "accent_color": accent_color
+    }
+
 
         if logo:
             logo_path = f"{tenant_id}/logo.png"
