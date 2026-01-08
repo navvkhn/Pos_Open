@@ -10,9 +10,9 @@ def login():
     tab1, tab2 = st.tabs(["Login", "Signup"])
 
     with tab1:
-        tenant_name = st.text_input("Restaurant Name")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        tenant_name = st.text_input("Restaurant Name", key="login_restaurant")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
 
         if st.button("Login"):
             db = SessionLocal()
