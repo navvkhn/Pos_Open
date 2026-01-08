@@ -21,21 +21,41 @@ def settings(tenant_id):
             "contact": contact
         }
 
+        # -------- LOGO UPLOAD --------
         if logo:
-            path = f"{tenant_id}/logo.png"
+            logo_path = f"{tenant_id}/logo.png"
             supabase.storage.from_("branding").upload(
-                path, logo.getvalue(),
-                {"content-type": logo.type}, upsert=True
+                logo_path,
+                logo.getvalue(),
+                {
+                    "content-type": logo.type,
+                    "upsert": True
+                }
             )
-            updates["logo_url"] = supabase.storage.from_("branding").get_public_url(path)
+            updates["logo_url"] = (
+                supabase.storage.from_("branding")
+                .get_public_url(logo_path)
+            )
 
+        # -------- UPI QR UPLOAD --------
         if upi_qr:
-            path = f"{tenant_id}/upi_qr.png"
+            qr_path = f"{tenant_id}/upi_qr.png"
             supabase.storage.from_("branding").upload(
-                path, upi_qr.getvalue(),
-                {"content-type": upi_qr.type}, upsert=True
+                qr_path,
+                upi_qr.getvalue(),
+                {
+                    "content-type": upi_qr.type,
+                    "upsert": True
+                }
             )
-            updates["upi_qr_url"] = supabase.storage.from_("branding").get_public_url(path)
+            updates["upi_qr_url"] = (
+                supabase.storage.from_("branding")
+                .get_public_url(qr_path)
+            )
 
-        supabase.table("tenants").update(updates).eq("id", tenant_id).execute()
-        st.success("✅ Branding updated")
+        supabase.table("tenants") \
+            .update(updates) \
+            .eq("id", tenant_id) \
+            .execute()
+
+        st.success("✅ Branding updated successfully")
