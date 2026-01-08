@@ -1,10 +1,19 @@
 import streamlit as st
 from supabase_client import supabase
 from datetime import datetime, timedelta
+from collections import defaultdict
+import pytz
+
+IST = pytz.timezone("Asia/Kolkata")
+
 
 def customer_menu(tenant_name):
+    st.set_page_config(layout="wide")
     st.title(f"🍽 Welcome to {tenant_name}")
 
+    # --------------------------------------------------
+    # FETCH TENANT
+    # --------------------------------------------------
     tenant = supabase.table("tenants") \
         .select("id") \
         .eq("name", tenant_name) \
@@ -17,25 +26,26 @@ def customer_menu(tenant_name):
 
     tenant_id = tenant.data["id"]
 
-    # --------------------
-    # Customer Info
-    # --------------------
+    # --------------------------------------------------
+    # CUSTOMER DETAILS
+    # --------------------------------------------------
     st.subheader("👤 Your Details")
+
     name = st.text_input("Your Name")
     mobile = st.text_input("Mobile Number")
 
     if not name or not mobile:
-        st.info("Please enter name and mobile to continue")
+        st.info("Please enter your name and mobile number to continue")
         return
 
-    # --------------------
-    # Customer lookup / create
-    # --------------------
+    # --------------------------------------------------
+    # GET OR CREATE CUSTOMER
+    # --------------------------------------------------
     customer = supabase.table("customers") \
-        .select("id") \
+        .select("*") \
         .eq("tenant_id", tenant_id) \
         .eq("mobile", mobile) \
-        .single() \
+        .maybe_single() \
         .execute()
 
     if customer.data:
@@ -48,9 +58,95 @@ def customer_menu(tenant_name):
         }).execute()
         customer_id = customer.data[0]["id"]
 
-    # --------------------
-    # Products
-    # --------------------
+    # --------------------------------------------------
+    # 🔁 REPEAT LAST ORDER
+    # --------------------------------------------------
+    last_order = supabase.table("orders") \
+        .select("id") \
+        .eq("customer_id", customer_id) \
+        .order("created_at", desc=True) \
+        .limit(1) \
+        .execute()
+
+    if last_order.data:
+        if st.button("🔁 Repeat Last Order"):
+            last_items = supabase.table("order_items") \
+                .select("*") \
+                .eq("order_id", last_order.data[0]["id"]) \
+                .execute()
+
+            for item in last_items.data:
+                st.session_state[f"p_{item['product_name']}"] = item["quantity"]
+
+            st.success("Last order added to cart")
+            st.rerun()
+
+    st.divider()
+
+    # --------------------------------------------------
+    # ⭐ LOYALTY DISCOUNT (FIXED & WORKING)
+    # --------------------------------------------------
+    discount_percent = 0
+    loyalty_message = None
+
+    rules = supabase.table("loyalty_rules") \
+        .select("*") \
+        .eq("tenant_id", tenant_id) \
+        .eq("active", True) \
+        .execute()
+
+    now_utc = datetime.utcnow()
+
+    for rule in rules.data:
+        since_utc = now_utc - timedelta(days=rule["days"])
+
+        orders_count = supabase.table("orders") \
+            .select("id", count="exact") \
+            .eq("customer_id", customer_id) \
+            .eq("status", "completed") \
+            .gte("created_at", since_utc.isoformat()) \
+            .execute()
+
+        if orders_count.count >= rule["visits"]:
+            discount_percent = rule["discount_percent"]
+            loyalty_message = (
+                f"🎉 You are our loyal customer!\n\n"
+                f"You placed **{orders_count.count} orders** in last "
+                f"**{rule['days']} days**.\n\n"
+                f"🎁 You get **{discount_percent}% discount** on this bill!"
+            )
+            break
+
+    if loyalty_message:
+        st.success(loyalty_message)
+
+    # --------------------------------------------------
+    # 🔥 POPULAR ITEMS (OPTIONAL SUGGESTION)
+    # --------------------------------------------------
+    popular_items_raw = supabase.table("order_items") \
+        .select("product_name, quantity") \
+        .execute()
+
+    popular_count = defaultdict(int)
+    for p in popular_items_raw.data:
+        popular_count[p["product_name"]] += p["quantity"]
+
+    top_items = sorted(
+        popular_count.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:3]
+
+    if top_items:
+        st.subheader("🔥 Popular Choices")
+        for name, _ in top_items:
+            st.write(f"⭐ {name}")
+
+    st.divider()
+
+    # --------------------------------------------------
+    # FETCH PRODUCTS
+    # --------------------------------------------------
     products = supabase.table("products") \
         .select("*") \
         .eq("tenant_id", tenant_id) \
@@ -58,64 +154,82 @@ def customer_menu(tenant_name):
         .execute()
 
     if not products.data:
-        st.info("Menu coming soon")
+        st.info("Menu is empty")
         return
 
-    # 🔍 Search
-    search = st.text_input("🔍 Search items")
-
-    # 📂 Group by category
-    categories = {}
+    # --------------------------------------------------
+    # GROUP PRODUCTS BY CATEGORY
+    # --------------------------------------------------
+    grouped = defaultdict(list)
     for p in products.data:
-        if search and search.lower() not in p["name"].lower():
-            continue
-        categories.setdefault(p.get("category", "Others"), []).append(p)
+        grouped[p.get("category", "Others")].append(p)
 
     cart = {}
-    total = 0
+    total = 0.0
 
     st.subheader("📋 Menu")
 
-    # 📂 Category tabs
-    tabs = st.tabs(categories.keys())
-
-    for tab, (category, items) in zip(tabs, categories.items()):
-        with tab:
+    # --------------------------------------------------
+    # MENU UI (CATEGORY-WISE)
+    # --------------------------------------------------
+    for category, items in grouped.items():
+        with st.expander(f"🍽 {category}", expanded=True):
             for p in items:
-                cols = st.columns([ 3, 1])
-                
-                qty = cols[2].number_input(
-                    f"{p['name']} — ₹{p['price']}",
+                cols = st.columns([4, 1])
+
+                cols[0].markdown(
+                    f"**{p['name']}**  \n₹{p['price']}"
+                )
+
+                qty = cols[1].number_input(
+                    "Qty",
                     min_value=0,
                     step=1,
-                    key=f"p_{p['id']}"
+                    key=f"p_{p['name']}"
                 )
 
                 if qty > 0:
                     cart[p["id"]] = {
                         "name": p["name"],
                         "qty": qty,
-                        "price": p["price"]
+                        "price": float(p["price"])
                     }
-                    total += qty * p["price"]
+                    total += qty * float(p["price"])
 
+    # --------------------------------------------------
+    # BILL SUMMARY
+    # --------------------------------------------------
     st.divider()
+    st.subheader("🧾 Bill Summary")
 
-    if total == 0:
-        st.info("Add items to cart")
+    if not cart:
+        st.info("Please add items to cart")
         return
 
-    st.write(f"Subtotal: ₹{total}")
+    discount_amount = total * discount_percent / 100
+    final_total = total - discount_amount
 
-    # --------------------
-    # Place Order
-    # --------------------
+    st.write(f"Subtotal: ₹{total:.2f}")
+
+    if discount_percent > 0:
+        st.write(
+            f"🎉 Loyalty Discount ({discount_percent}%): "
+            f"-₹{discount_amount:.2f}"
+        )
+
+    st.write(f"**Total Payable: ₹{final_total:.2f}**")
+
+    # --------------------------------------------------
+    # PLACE ORDER
+    # --------------------------------------------------
     if st.button("🛒 Place Order"):
         order = supabase.table("orders").insert({
             "tenant_id": tenant_id,
             "customer_id": customer_id,
-            "customer_name": name,   # ✅ stored here
-            "total": total,
+            "customer_name": name,
+            "total": float(final_total),
+            "discount_percent": discount_percent,
+            "discount_amount": discount_amount,
             "status": "open",
             "payment_status": "pending"
         }).execute()
@@ -130,7 +244,8 @@ def customer_menu(tenant_name):
                 "price": item["qty"] * item["price"]
             }).execute()
 
-        st.success("Order placed. Please proceed to payment.")
+        st.success("Order placed successfully")
+        st.session_state.clear()
         st.query_params.clear()
         st.query_params["pay"] = str(order_id)
         st.rerun()
