@@ -2,3 +2,5 @@ streamlit
 supabase
 passlib
 python-dotenv
+qrcode
+pillow
