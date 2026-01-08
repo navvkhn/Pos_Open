@@ -82,10 +82,8 @@ def customer_menu(tenant_name):
     for tab, (category, items) in zip(tabs, categories.items()):
         with tab:
             for p in items:
-                cols = st.columns([1, 3, 1])
-                if p.get("image_url"):
-                    cols[0].image(p["image_url"], width=80)
-
+                cols = st.columns([ 3, 1])
+                
                 qty = cols[2].number_input(
                     f"{p['name']} — ₹{p['price']}",
                     min_value=0,
