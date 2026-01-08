@@ -5,6 +5,7 @@ from admin.products import products
 from admin.reports import reports
 from admin.settings import settings
 from customer.menu import customer_menu
+from customer.payment import payment_page
 from utils.qr import generate_qr
 
 # --------------------------------------------------
@@ -18,12 +19,18 @@ APP_URL = st.secrets.get(
 )
 
 # --------------------------------------------------
-# CUSTOMER QR MENU ROUTING
+# QUERY PARAM ROUTING (CUSTOMER SIDE)
 # --------------------------------------------------
 query = st.query_params
 
+# 1️⃣ Customer menu (QR)
 if "menu" in query:
     customer_menu(query["menu"])
+    st.stop()
+
+# 2️⃣ Payment page after order
+if "pay" in query:
+    payment_page(int(query["pay"]))
     st.stop()
 
 # --------------------------------------------------
