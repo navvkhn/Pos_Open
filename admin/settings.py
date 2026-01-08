@@ -1,5 +1,14 @@
 import streamlit as st
 from supabase_client import supabase
+primary_color = st.color_picker(
+    "Primary Brand Color",
+    value=tenant.data.get("primary_color", "#000000")
+)
+
+accent_color = st.color_picker(
+    "Accent Color",
+    value=tenant.data.get("accent_color", "#444444")
+)
 
 def settings(tenant_id):
     st.title("🏷 Cafe Branding & Payments")
