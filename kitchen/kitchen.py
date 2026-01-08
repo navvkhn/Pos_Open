@@ -12,16 +12,19 @@ def kitchen_screen(tenant_id):
     st.set_page_config(layout="wide")
 
     # --------------------------------------------------
-    # 🎨 MOBILE / TABLET FRIENDLY CSS
+    # 🎨 DARK-MODE SAFE RESPONSIVE CSS
     # --------------------------------------------------
     st.markdown("""
     <style>
     .order-card {
-        border: 1px solid #ddd;
+        background-color: var(--secondary-background-color);
+        border: 1px solid rgba(128,128,128,0.4);
         border-radius: 12px;
-        padding: 12px;
+        padding: 14px;
         margin-bottom: 16px;
-        background-color: #fafafa;
+    }
+    .order-card h4 {
+        margin-bottom: 6px;
     }
     button {
         min-height: 48px;
@@ -42,13 +45,12 @@ def kitchen_screen(tenant_id):
         st.session_state.kitchen_last_refresh = time.time()
         st.rerun()
 
-    # Manual refresh (fallback)
     if st.button("🔄 Refresh"):
         st.session_state.kitchen_last_refresh = time.time()
         st.rerun()
 
     # --------------------------------------------------
-    # 📦 FETCH ONLY OPEN ORDERS
+    # 📦 FETCH ONLY OPEN ORDERS (JOIN ITEMS)
     # --------------------------------------------------
     orders = supabase.table("orders") \
         .select("""
@@ -68,13 +70,11 @@ def kitchen_screen(tenant_id):
         return
 
     # --------------------------------------------------
-    # 📱 RESPONSIVE GRID
+    # 📱 RESPONSIVE GRID (MOBILE SAFE)
     # --------------------------------------------------
-    screen_width = st.session_state.get("screen_width", 1200)
-
-    if screen_width < 600:
+    if st.session_state.get("screen_width", 1200) < 700:
         cols_per_row = 1
-    elif screen_width < 900:
+    elif st.session_state.get("screen_width", 1200) < 1000:
         cols_per_row = 2
     else:
         cols_per_row = 4
@@ -116,7 +116,6 @@ def kitchen_screen(tenant_id):
                 unsafe_allow_html=True
             )
 
-            # ITEMS
             for item in order.get("order_items", []):
                 st.write(
                     f"- {item['product_name']} × {item['quantity']}"
@@ -124,7 +123,6 @@ def kitchen_screen(tenant_id):
 
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # ACTION
             if st.button(
                 "✅ Mark Prepared",
                 key=f"prep_{order['id']}",
