@@ -56,7 +56,7 @@ else:
     # ---- MAIN NAVIGATION ----
     page = st.sidebar.selectbox(
         "Menu",
-        ["Products", "Reports", "Settings"]
+        ["Products", "Reports", "Settings", "Kitchen", "Reception"]
     )
 
     # ---- PAGE ROUTING ----
@@ -65,6 +65,11 @@ else:
 
     elif page == "Reports":
         reports(tenant_id)
+    elif page == "Kitchen":
+    kitchen_screen(tenant_id)
+    
+    elif page == "Reception":
+    reception_screen(tenant_id)
 
     elif page == "Settings":
         settings(tenant_id)
