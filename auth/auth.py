@@ -2,7 +2,7 @@ import streamlit as st
 from db import SessionLocal
 from models import User, Tenant
 from passlib.hash import pbkdf2_sha256
-from auth.signup import signup
+from .signup import signup
 
 def login():
     st.title("🔐 Login")
