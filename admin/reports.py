@@ -1,25 +1,16 @@
 import streamlit as st
-from db import SessionLocal
-from models import Order
-from sqlalchemy import func
-import datetime
+from supabase_client import supabase
 
 def reports(tenant_id):
     st.title("📊 Daily Sales")
 
-    db = SessionLocal()
-    today = datetime.date.today()
+    orders = supabase.table("orders") \
+        .select("total") \
+        .eq("tenant_id", tenant_id) \
+        .execute()
 
-    revenue = db.query(func.sum(Order.total))\
-        .filter(func.date(Order.created_at)==today)\
-        .filter(Order.tenant_id==tenant_id)\
-        .scalar() or 0
+    total = sum(o["total"] for o in orders.data) if orders.data else 0
+    count = len(orders.data)
 
-    orders = db.query(Order)\
-        .filter(func.date(Order.created_at)==today)\
-        .filter(Order.tenant_id==tenant_id)\
-        .count()
-
-    col1,col2 = st.columns(2)
-    col1.metric("Revenue", f"₹ {revenue}")
-    col2.metric("Orders", orders)
+    st.metric("Revenue", f"₹ {total}")
+    st.metric("Orders", count)
