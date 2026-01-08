@@ -11,13 +11,14 @@ def customer_menu(tenant_name):
     tenant = supabase.table("tenants") \
         .select("id") \
         .eq("name", tenant_name) \
+        .single() \
         .execute()
 
     if not tenant.data:
         st.error("Restaurant not found")
         return
 
-    tenant_id = tenant.data[0]["id"]
+    tenant_id = tenant.data["id"]
 
     # --------------------
     # Customer Info
@@ -99,6 +100,7 @@ def customer_menu(tenant_name):
 
     for p in products.data:
         cols = st.columns([1, 3, 1])
+
         if p.get("image_url"):
             cols[0].image(p["image_url"], width=80)
 
@@ -142,7 +144,8 @@ def customer_menu(tenant_name):
             "total": final_total,
             "discount_percent": discount_percent,
             "discount_amount": discount_amount,
-            "status": "open"
+            "status": "open",
+            "payment_status": "pending"
         }).execute()
 
         order_id = order.data[0]["id"]
@@ -155,5 +158,10 @@ def customer_menu(tenant_name):
                 "price": item["qty"] * item["price"]
             }).execute()
 
-        st.success("✅ Order placed successfully")
+        # ✅ Redirect to payment page
+        st.success("Order placed. Please complete payment.")
+        st.session_state["order_id"] = order_id
+        st.query_params.clear()
+        st.query_params["pay"] = str(order_id)
         st.balloons()
+        st.rerun()
