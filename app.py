@@ -5,6 +5,7 @@ from admin.discounts import discounts
 from admin.reports import reports
 from pos.billing import billing
 from customer.menu import customer_menu
+from auth import login
 
 st.set_page_config(page_title="Superscale POS", layout="wide")
 
