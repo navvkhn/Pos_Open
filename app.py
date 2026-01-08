@@ -1,12 +1,18 @@
 import streamlit as st
-from reportlab.lib.pagesizes import A4
+
 from auth import login
 from admin.products import products
 from admin.reports import reports
 from admin.settings import settings
+
 from customer.menu import customer_menu
 from customer.payment import payment_page
+
+from kitchen.kitchen import kitchen_screen
+from reception.reception import reception_screen
+
 from utils.qr import generate_qr
+
 
 # --------------------------------------------------
 # App config
@@ -56,7 +62,7 @@ else:
     # ---- MAIN NAVIGATION ----
     page = st.sidebar.selectbox(
         "Menu",
-        ["Products", "Reports", "Settings", "Kitchen", "Reception"]
+        ["Products", "Reports", "Kitchen", "Reception", "Settings"]
     )
 
     # ---- PAGE ROUTING ----
@@ -65,11 +71,12 @@ else:
 
     elif page == "Reports":
         reports(tenant_id)
+
     elif page == "Kitchen":
-    kitchen_screen(tenant_id)
-    
+        kitchen_screen(tenant_id)
+
     elif page == "Reception":
-    reception_screen(tenant_id)
+        reception_screen(tenant_id)
 
     elif page == "Settings":
         settings(tenant_id)
