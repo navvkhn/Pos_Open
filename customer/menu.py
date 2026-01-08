@@ -1,61 +1,77 @@
 import streamlit as st
-from db import SessionLocal
-from models import Product, Order, OrderItem
+from supabase_client import supabase
 
-def customer_menu(tenant_id):
-    st.title("📱 Customer Menu")
+def customer_menu(tenant_name: str):
+    st.title(f"🍽 Menu – {tenant_name}")
 
-    db = SessionLocal()
+    # Get tenant
+    tenant_res = supabase.table("tenants") \
+        .select("id") \
+        .eq("name", tenant_name) \
+        .execute()
 
-    table_no = st.text_input("Your Table Number")
+    if not tenant_res.data:
+        st.error("Restaurant not found")
+        return
 
-    products = db.query(Product)\
-        .filter(Product.tenant_id == tenant_id)\
-        .filter(Product.available == True)\
-        .all()
+    tenant_id = tenant_res.data[0]["id"]
 
-    cart = st.session_state.get("cust_cart", {})
+    table_no = st.text_input("Table Number")
+
+    products = supabase.table("products") \
+        .select("*") \
+        .eq("tenant_id", tenant_id) \
+        .eq("available", True) \
+        .execute()
+
+    if not products.data:
+        st.info("Menu not available")
+        return
+
+    cart = st.session_state.get("cart", {})
 
     st.subheader("Menu")
-    for p in products:
+
+    for p in products.data:
         qty = st.number_input(
-            f"{p.name} (₹{p.price})",
+            f"{p['name']} – ₹{p['price']}",
             min_value=0,
-            key=f"cust_{p.id}"
+            key=f"cust_{p['id']}"
         )
         if qty > 0:
-            cart[p.id] = qty
+            cart[p["id"]] = {
+                "name": p["name"],
+                "qty": qty,
+                "price": p["price"]
+            }
 
-    st.session_state["cust_cart"] = cart
+    st.session_state["cart"] = cart
 
-    if st.button("Place Order"):
+    if st.button("🛒 Place Order"):
         if not cart:
             st.warning("Cart is empty")
             return
 
-        order = Order(
-            tenant_id=tenant_id,
-            table_no=table_no,
-            total=0
-        )
-        db.add(order)
-        db.commit()
+        order = supabase.table("orders").insert({
+            "tenant_id": tenant_id,
+            "table_no": table_no,
+            "total": sum(
+                item["qty"] * item["price"]
+                for item in cart.values()
+            ),
+            "status": "open"
+        }).execute()
 
-        total = 0
-        for pid, qty in cart.items():
-            product = db.query(Product).get(pid)
-            price = product.price * qty
-            total += price
-            db.add(OrderItem(
-                order_id=order.id,
-                product_name=product.name,
-                quantity=qty,
-                price=price
-            ))
+        order_id = order.data[0]["id"]
 
-        order.total = total
-        db.commit()
+        for item in cart.values():
+            supabase.table("order_items").insert({
+                "order_id": order_id,
+                "product_name": item["name"],
+                "quantity": item["qty"],
+                "price": item["qty"] * item["price"]
+            }).execute()
 
-        st.success("✅ Order placed successfully!")
-        st.session_state["cust_cart"] = {}
+        st.success("✅ Order placed successfully")
+        st.session_state["cart"] = {}
         st.rerun()
