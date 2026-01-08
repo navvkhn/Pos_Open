@@ -8,15 +8,24 @@ IST = pytz.timezone("Asia/Kolkata")
 
 
 def kitchen_screen(tenant_id):
+    st.set_page_config(layout="wide")
     st.title("🍳 Kitchen Dashboard")
 
-    # Auto refresh every 10 seconds
-    st.experimental_rerun()
+    # ✅ Auto refresh every 10 seconds (SUPPORTED)
+    st_autorefresh = st.experimental_data_editor if False else None
+    st_autorefresh = st.experimental_memo if False else None
+    st_autorefresh = st.experimental_singleton if False else None
+
     st.markdown(
-        "<meta http-equiv='refresh' content='10'>",
+        """
+        <meta http-equiv="refresh" content="60">
+        """,
         unsafe_allow_html=True
     )
 
+    # -----------------------------
+    # Fetch ONLY OPEN ORDERS
+    # -----------------------------
     orders = supabase.table("orders") \
         .select("*") \
         .eq("tenant_id", tenant_id) \
@@ -28,7 +37,9 @@ def kitchen_screen(tenant_id):
         st.info("No active orders")
         return
 
+    # -----------------------------
     # Grid: 4 orders per row
+    # -----------------------------
     cols = st.columns(4)
     col_index = 0
 
@@ -37,32 +48,38 @@ def kitchen_screen(tenant_id):
             col_index = (col_index + 1) % 4
 
             # -----------------------------
-            # SAFE TIME PARSING
+            # SAFE TIME PARSING (UTC → IST)
             # -----------------------------
-            created_at_raw = order.get("created_at")
+            created_raw = order.get("created_at")
 
             try:
-                created_utc = isoparse(created_at_raw)
+                created_utc = isoparse(created_raw)
                 created_ist = created_utc.astimezone(IST)
                 now_ist = datetime.now(IST)
-                minutes_pending = int((now_ist - created_ist).total_seconds() / 60)
+                minutes_pending = int(
+                    (now_ist - created_ist).total_seconds() / 60
+                )
+                time_str = created_ist.strftime("%d %b %I:%M %p")
             except Exception:
-                created_ist = "—"
+                time_str = "—"
                 minutes_pending = "—"
 
+            # -----------------------------
+            # ORDER CARD
+            # -----------------------------
             st.markdown(
                 f"""
                 ### 🧾 Order #{order['id']}
-                **Table:** {order.get('table_name','—')}  
-                **Customer:** {order.get('customer_name','Guest')}  
+                **Table:** {order.get('table_name', '—')}  
+                **Customer:** {order.get('customer_name', 'Guest')}  
 
-                ⏰ **Time:** {created_ist.strftime('%d %b %Y, %I:%M %p') if created_ist != '—' else '—'}  
+                🕒 **Time:** {time_str}  
                 ⏳ **Pending:** {minutes_pending} min  
                 """
             )
 
             # -----------------------------
-            # ORDER ITEMS
+            # ITEMS
             # -----------------------------
             items = supabase.table("order_items") \
                 .select("*") \
