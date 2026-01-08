@@ -141,6 +141,19 @@ def generate_bill_pdf(order_id):
 
     elements.append(totals_table)
     elements.append(Spacer(1, 20))
+stamp_text = "PAID" if order.data["payment_status"] == "paid" else "UNPAID"
+stamp_color = colors.green if stamp_text == "PAID" else colors.red
+
+stamp_style = ParagraphStyle(
+    "Stamp",
+    fontSize=28,
+    textColor=stamp_color,
+    alignment=1,
+    spaceBefore=20,
+    spaceAfter=20
+)
+
+elements.append(Paragraph(f"<b>{stamp_text}</b>", stamp_style))
 
     # --------------------------------------------------
     # Footer
