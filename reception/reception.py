@@ -1,53 +1,61 @@
 import streamlit as st
 from supabase_client import supabase
 from postgrest.exceptions import APIError
+from datetime import datetime
+import pytz
+
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def reception_screen(tenant_id):
     st.title("🧾 Reception / Cashier")
+
     # --------------------------------------------------
-# 📊 TOP DASHBOARD METRICS
-# --------------------------------------------------
-today_ist = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
-today_utc = today_ist.astimezone(pytz.utc)
+    # 📊 TOP DASHBOARD METRICS
+    # --------------------------------------------------
+    today_ist = datetime.now(IST).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    today_utc = today_ist.astimezone(pytz.utc)
 
-unpaid = supabase.table("orders") \
-    .select("id", count="exact") \
-    .eq("tenant_id", tenant_id) \
-    .eq("payment_status", "pending") \
-    .execute()
+    unpaid = supabase.table("orders") \
+        .select("id", count="exact") \
+        .eq("tenant_id", tenant_id) \
+        .eq("payment_status", "pending") \
+        .execute()
 
-open_orders = supabase.table("orders") \
-    .select("id", count="exact") \
-    .eq("tenant_id", tenant_id) \
-    .eq("status", "open") \
-    .execute()
+    open_orders = supabase.table("orders") \
+        .select("id", count="exact") \
+        .eq("tenant_id", tenant_id) \
+        .eq("status", "open") \
+        .execute()
 
-prepared = supabase.table("orders") \
-    .select("id", count="exact") \
-    .eq("tenant_id", tenant_id) \
-    .eq("status", "prepared") \
-    .execute()
+    prepared = supabase.table("orders") \
+        .select("id", count="exact") \
+        .eq("tenant_id", tenant_id) \
+        .eq("status", "prepared") \
+        .execute()
 
-today_paid = supabase.table("orders") \
-    .select("total") \
-    .eq("tenant_id", tenant_id) \
-    .eq("payment_status", "paid") \
-    .gte("created_at", today_utc.isoformat()) \
-    .execute()
+    today_paid = supabase.table("orders") \
+        .select("total") \
+        .eq("tenant_id", tenant_id) \
+        .eq("payment_status", "paid") \
+        .gte("created_at", today_utc.isoformat()) \
+        .execute()
 
-today_revenue = sum(o["total"] for o in today_paid.data)
+    today_revenue = sum(float(o["total"]) for o in today_paid.data)
 
-c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("💳 Unpaid Orders", unpaid.count)
+    c2.metric("🕒 Open Orders", open_orders.count)
+    c3.metric("🍳 Prepared", prepared.count)
+    c4.metric("₹ Today Revenue", f"{today_revenue:.2f}")
 
-c1.metric("💳 Unpaid Orders", unpaid.count)
-c2.metric("🕒 Open Orders", open_orders.count)
-c3.metric("🍳 Prepared", prepared.count)
-c4.metric("₹ Today Revenue", f"{today_revenue:.2f}")
+    st.divider()
 
-st.divider()
-
-
+    # --------------------------------------------------
+    # ORDERS LIST
+    # --------------------------------------------------
     orders = supabase.table("orders") \
         .select("*") \
         .eq("tenant_id", tenant_id) \
@@ -61,7 +69,6 @@ st.divider()
     for order in orders.data:
         order_id = order["id"]
 
-        # ---- SAFE READS
         total = float(order.get("total") or 0)
         discount_amount_db = float(order.get("discount_amount") or 0)
         discount_percent_db = float(order.get("discount_percent") or 0)
@@ -75,7 +82,7 @@ st.divider()
                 continue
 
             # -------------------------
-            # TABLE
+            # TABLE NAME
             # -------------------------
             table_name = st.text_input(
                 "Table Name / Number",
@@ -90,17 +97,12 @@ st.divider()
             # -------------------------
             st.subheader("🏷 Adjust Discount")
 
-            if subtotal <= 0:
-                st.warning("Invalid subtotal")
-                continue
-
             col1, col2 = st.columns(2)
 
             with col1:
                 discount_percent_input = st.number_input(
                     "Discount %",
-                    min_value=0.0,
-                    max_value=100.0,
+                    0.0, 100.0,
                     value=discount_percent_db,
                     step=1.0,
                     key=f"dp_{order_id}"
@@ -109,23 +111,19 @@ st.divider()
             with col2:
                 discount_amount_input = st.number_input(
                     "Discount Amount (₹)",
-                    min_value=0.0,
-                    max_value=subtotal,
+                    0.0, subtotal,
                     value=discount_amount_db,
                     step=1.0,
                     key=f"da_{order_id}"
                 )
 
-            # -------------------------
-            # CALCULATION (NO STRINGS)
-            # -------------------------
             if discount_percent_input > 0:
                 final_discount_amount = round(
                     subtotal * discount_percent_input / 100, 2
                 )
-                final_discount_percent = round(discount_percent_input, 2)
+                final_discount_percent = discount_percent_input
             elif discount_amount_input > 0:
-                final_discount_amount = round(discount_amount_input, 2)
+                final_discount_amount = discount_amount_input
                 final_discount_percent = round(
                     (final_discount_amount / subtotal) * 100, 2
                 )
@@ -134,8 +132,6 @@ st.divider()
                 final_discount_percent = 0.0
 
             final_total = round(subtotal - final_discount_amount, 2)
-            if final_total < 0:
-                final_total = 0.0
 
             st.markdown(
                 f"""
@@ -146,7 +142,7 @@ st.divider()
             )
 
             # -------------------------
-            # SAVE BILL (22P02 SAFE)
+            # SAVE BILL
             # -------------------------
             if st.button("💾 Save Bill", key=f"save_{order_id}"):
                 payload = {
