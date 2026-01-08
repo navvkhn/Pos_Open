@@ -3,8 +3,13 @@ from supabase_client import supabase
 from postgrest.exceptions import APIError
 from datetime import datetime
 import pytz
+import time
 
+# --------------------------------------------------
+# CONFIG
+# --------------------------------------------------
 IST = pytz.timezone("Asia/Kolkata")
+time.sleep(0.3)  # prevent rapid reruns hitting Supabase
 
 
 def reception_screen(tenant_id):
@@ -25,37 +30,42 @@ def reception_screen(tenant_id):
     today_utc = today_ist.astimezone(pytz.utc)
 
     # --------------------------------------------------
-    # 📊 TOP DASHBOARD METRICS
+    # 📊 TOP DASHBOARD METRICS (SAFE)
     # --------------------------------------------------
-    unpaid = supabase.table("orders") \
-        .select("id", count="exact") \
-        .eq("tenant_id", tenant_id) \
-        .eq("payment_status", "pending") \
-        .gte("created_at", today_utc.isoformat()) \
-        .execute()
+    try:
+        unpaid = supabase.table("orders") \
+            .select("id", count="exact") \
+            .eq("tenant_id", tenant_id) \
+            .eq("payment_status", "pending") \
+            .gte("created_at", today_utc.isoformat()) \
+            .execute()
 
-    open_orders = supabase.table("orders") \
-        .select("id", count="exact") \
-        .eq("tenant_id", tenant_id) \
-        .eq("status", "open") \
-        .gte("created_at", today_utc.isoformat()) \
-        .execute()
+        open_orders = supabase.table("orders") \
+            .select("id", count="exact") \
+            .eq("tenant_id", tenant_id) \
+            .eq("status", "open") \
+            .gte("created_at", today_utc.isoformat()) \
+            .execute()
 
-    prepared = supabase.table("orders") \
-        .select("id", count="exact") \
-        .eq("tenant_id", tenant_id) \
-        .eq("status", "prepared") \
-        .gte("created_at", today_utc.isoformat()) \
-        .execute()
+        prepared = supabase.table("orders") \
+            .select("id", count="exact") \
+            .eq("tenant_id", tenant_id) \
+            .eq("status", "prepared") \
+            .gte("created_at", today_utc.isoformat()) \
+            .execute()
 
-    today_paid = supabase.table("orders") \
-        .select("total") \
-        .eq("tenant_id", tenant_id) \
-        .eq("payment_status", "paid") \
-        .gte("created_at", today_utc.isoformat()) \
-        .execute()
+        today_paid = supabase.table("orders") \
+            .select("total") \
+            .eq("tenant_id", tenant_id) \
+            .eq("payment_status", "paid") \
+            .gte("created_at", today_utc.isoformat()) \
+            .execute()
 
-    today_revenue = sum(float(o["total"]) for o in today_paid.data)
+        today_revenue = sum(float(o["total"]) for o in today_paid.data)
+
+    except Exception:
+        st.error("⚠️ Network issue. Please refresh.")
+        return
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("💳 Unpaid Orders", unpaid.count)
@@ -66,14 +76,24 @@ def reception_screen(tenant_id):
     st.divider()
 
     # --------------------------------------------------
-    # 🧾 FETCH ONLY TODAY'S ORDERS
+    # 🧾 FETCH TODAY'S ORDERS (JOIN ITEMS – SINGLE CALL)
     # --------------------------------------------------
-    orders = supabase.table("orders") \
-        .select("*") \
-        .eq("tenant_id", tenant_id) \
-        .gte("created_at", today_utc.isoformat()) \
-        .order("created_at", desc=True) \
-        .execute()
+    try:
+        orders = supabase.table("orders") \
+            .select("""
+                *,
+                order_items (
+                    product_name
+                )
+            """) \
+            .eq("tenant_id", tenant_id) \
+            .gte("created_at", today_utc.isoformat()) \
+            .order("created_at", desc=True) \
+            .execute()
+
+    except Exception:
+        st.error("⚠️ Unable to load orders. Please refresh.")
+        return
 
     if not orders.data:
         st.info("No orders for today")
@@ -93,18 +113,13 @@ def reception_screen(tenant_id):
         subtotal = total + discount_amount_db
 
         # -------------------------
-        # FIRST ITEM NAME
+        # ITEM LABEL (NO EXTRA QUERY)
         # -------------------------
-        items = supabase.table("order_items") \
-            .select("product_name") \
-            .eq("order_id", order_id) \
-            .limit(2) \
-            .execute()
-
-        if len(items.data) == 1:
-            item_label = items.data[0]["product_name"]
-        elif len(items.data) > 1:
-            item_label = f"{items.data[0]['product_name']} + more"
+        items = order.get("order_items") or []
+        if len(items) == 1:
+            item_label = items[0]["product_name"]
+        elif len(items) > 1:
+            item_label = f"{items[0]['product_name']} + more"
         else:
             item_label = "—"
 
