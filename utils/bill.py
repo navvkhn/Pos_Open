@@ -9,10 +9,12 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+from reportlab.lib.colors import HexColor
 from reportlab.lib.units import mm
 import io
 from supabase_client import supabase
 import requests
+
 
 def generate_bill_pdf(order_id):
     buffer = io.BytesIO()
@@ -20,10 +22,10 @@ def generate_bill_pdf(order_id):
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=20,
-        leftMargin=20,
-        topMargin=20,
-        bottomMargin=20
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25
     )
 
     styles = getSampleStyleSheet()
@@ -50,40 +52,40 @@ def generate_bill_pdf(order_id):
         .execute()
 
     # --------------------------------------------------
+    # Branding colors
+    # --------------------------------------------------
+    primary_color = HexColor(tenant.data.get("primary_color", "#000000"))
+    accent_color = HexColor(tenant.data.get("accent_color", "#DDDDDD"))
+
+    # --------------------------------------------------
     # Logo
     # --------------------------------------------------
     if tenant.data.get("logo_url"):
         try:
             img_data = requests.get(tenant.data["logo_url"]).content
-            logo = Image(io.BytesIO(img_data), width=50*mm, height=20*mm)
+            logo = Image(io.BytesIO(img_data), width=45 * mm, height=18 * mm)
             logo.hAlign = "CENTER"
             elements.append(logo)
             elements.append(Spacer(1, 10))
-        except:
+        except Exception:
             pass
 
     # --------------------------------------------------
     # Cafe Name
     # --------------------------------------------------
     title_style = ParagraphStyle(
-        "TitleStyle",
-        parent=styles["Title"],
-        alignment=1,
+        "Title",
         fontSize=18,
-        spaceAfter=10
+        alignment=1,
+        textColor=primary_color,
+        spaceAfter=8
     )
-    elements.append(Paragraph(tenant.data["name"], title_style))
+    elements.append(Paragraph(f"<b>{tenant.data['name']}</b>", title_style))
 
-    elements.append(Spacer(1, 5))
-
-    # --------------------------------------------------
-    # Invoice Meta
-    # --------------------------------------------------
     meta_style = ParagraphStyle(
         "Meta",
-        parent=styles["Normal"],
-        alignment=1,
-        fontSize=10
+        fontSize=10,
+        alignment=1
     )
 
     elements.append(Paragraph(f"Invoice No: {order_id}", meta_style))
@@ -91,7 +93,7 @@ def generate_bill_pdf(order_id):
     elements.append(Spacer(1, 15))
 
     # --------------------------------------------------
-    # Items Table
+    # Items table
     # --------------------------------------------------
     table_data = [["Item", "Qty", "Amount (₹)"]]
 
@@ -102,14 +104,14 @@ def generate_bill_pdf(order_id):
             f"{item['price']:.2f}"
         ])
 
-    table = Table(table_data, colWidths=[90*mm, 25*mm, 35*mm])
+    table = Table(table_data, colWidths=[90 * mm, 25 * mm, 35 * mm])
     table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 0.8, colors.black),
-        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
-        ("ALIGN", (1,1), (-1,-1), "CENTER"),
-        ("FONT", (0,0), (-1,0), "Helvetica-Bold"),
-        ("BOTTOMPADDING", (0,0), (-1,0), 8),
-        ("TOPPADDING", (0,0), (-1,0), 8),
+        ("GRID", (0, 0), (-1, -1), 0.8, primary_color),
+        ("BACKGROUND", (0, 0), (-1, 0), accent_color),
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ("TOPPADDING", (0, 0), (-1, 0), 8),
     ]))
 
     elements.append(table)
@@ -119,50 +121,49 @@ def generate_bill_pdf(order_id):
     # Totals
     # --------------------------------------------------
     totals_data = [
-        ["Subtotal", f"₹ {order.data['total'] + order.data.get('discount_amount', 0):.2f}"],
+        ["Subtotal", f"₹ {order.data['total'] + order.data.get('discount_amount', 0):.2f}"]
     ]
 
     if order.data.get("discount_amount", 0) > 0:
-        totals_data.append(
-            ["Discount", f"- ₹ {order.data['discount_amount']:.2f}"]
-        )
+        totals_data.append(["Discount", f"- ₹ {order.data['discount_amount']:.2f}"])
 
-    totals_data.append(
-        ["Total Payable", f"₹ {order.data['total']:.2f}"]
-    )
+    totals_data.append(["Total Payable", f"₹ {order.data['total']:.2f}"])
 
-    totals_table = Table(totals_data, colWidths=[115*mm, 35*mm])
+    totals_table = Table(totals_data, colWidths=[115 * mm, 35 * mm])
     totals_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 0.8, colors.black),
-        ("ALIGN", (1,0), (-1,-1), "RIGHT"),
-        ("FONT", (-1,-1), (-1,-1), "Helvetica-Bold"),
-        ("BACKGROUND", (-1,-1), (-1,-1), colors.lightgrey),
+        ("GRID", (0, 0), (-1, -1), 0.8, primary_color),
+        ("BACKGROUND", (-1, -1), (-1, -1), accent_color),
+        ("FONT", (-1, -1), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
     ]))
 
     elements.append(totals_table)
     elements.append(Spacer(1, 20))
-stamp_text = "PAID" if order.data["payment_status"] == "paid" else "UNPAID"
-stamp_color = colors.green if stamp_text == "PAID" else colors.red
 
-stamp_style = ParagraphStyle(
-    "Stamp",
-    fontSize=28,
-    textColor=stamp_color,
-    alignment=1,
-    spaceBefore=20,
-    spaceAfter=20
-)
+    # --------------------------------------------------
+    # PAID / UNPAID STAMP
+    # --------------------------------------------------
+    stamp_text = "PAID" if order.data["payment_status"] == "paid" else "UNPAID"
+    stamp_color = colors.green if stamp_text == "PAID" else colors.red
 
-elements.append(Paragraph(f"<b>{stamp_text}</b>", stamp_style))
+    stamp_style = ParagraphStyle(
+        "Stamp",
+        fontSize=28,
+        textColor=stamp_color,
+        alignment=1,
+        spaceBefore=15,
+        spaceAfter=20
+    )
+
+    elements.append(Paragraph(f"<b>{stamp_text}</b>", stamp_style))
 
     # --------------------------------------------------
     # Footer
     # --------------------------------------------------
     footer_style = ParagraphStyle(
         "Footer",
-        parent=styles["Normal"],
-        alignment=1,
         fontSize=9,
+        alignment=1,
         textColor=colors.grey
     )
 
@@ -172,8 +173,15 @@ elements.append(Paragraph(f"<b>{stamp_text}</b>", stamp_style))
     if tenant.data.get("contact"):
         elements.append(Paragraph(f"Contact: {tenant.data['contact']}", footer_style))
 
-    elements.append(Paragraph("Follow us on Instagram 📸 @yourcafename", footer_style))
-    elements.append(Spacer(1, 5))
+    if tenant.data.get("instagram_handle"):
+        elements.append(
+            Paragraph(
+                f"Follow us on Instagram 📸 @{tenant.data['instagram_handle']}",
+                footer_style
+            )
+        )
+
+    elements.append(Spacer(1, 6))
     elements.append(Paragraph("Powered by Superscale POS", footer_style))
 
     # --------------------------------------------------
