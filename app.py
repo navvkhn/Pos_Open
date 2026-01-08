@@ -12,6 +12,7 @@ from kitchen.kitchen import kitchen_screen
 from reception.reception import reception_screen
 
 from utils.qr import generate_qr
+from supabase_client import supabase
 
 
 # --------------------------------------------------
@@ -24,23 +25,39 @@ APP_URL = st.secrets.get(
     "https://posbynaved.streamlit.app"
 )
 
-# --------------------------------------------------
-# QUERY PARAM ROUTING (CUSTOMER SIDE)
-# --------------------------------------------------
 query = st.query_params
 
-# 1️⃣ Customer menu (QR)
+# --------------------------------------------------
+# PUBLIC ROUTES (NO LOGIN)
+# --------------------------------------------------
+
+# 1️⃣ Customer QR Menu
 if "menu" in query:
     customer_menu(query["menu"])
     st.stop()
 
-# 2️⃣ Payment page after order
+# 2️⃣ Payment page
 if "pay" in query:
     payment_page(int(query["pay"]))
     st.stop()
 
+# 3️⃣ Kitchen screen (PUBLIC, NO LOGIN)
+if "kitchen" in query:
+    tenant = supabase.table("tenants") \
+        .select("id") \
+        .eq("name", query["kitchen"]) \
+        .single() \
+        .execute()
+
+    if tenant.data:
+        kitchen_screen(tenant.data["id"])
+    else:
+        st.error("Kitchen not found")
+
+    st.stop()
+
 # --------------------------------------------------
-# ADMIN FLOW
+# ADMIN FLOW (LOGIN REQUIRED)
 # --------------------------------------------------
 if "user" not in st.session_state:
     login()
@@ -59,10 +76,16 @@ else:
         st.image(qr_img, caption="Scan to open menu")
         st.code(menu_url)
 
+    # ---- KITCHEN URL (PUBLIC) ----
+    with st.sidebar.expander("🍳 Kitchen Screen"):
+        kitchen_url = f"{APP_URL}/?kitchen={tenant_name.replace(' ', '%20')}"
+        st.code(kitchen_url)
+        st.caption("Open this on kitchen tablet / screen")
+
     # ---- MAIN NAVIGATION ----
     page = st.sidebar.selectbox(
         "Menu",
-        ["Products", "Reports", "Kitchen", "Reception", "Settings"]
+        ["Products", "Reports", "Reception", "Settings"]
     )
 
     # ---- PAGE ROUTING ----
@@ -71,9 +94,6 @@ else:
 
     elif page == "Reports":
         reports(tenant_id)
-
-    elif page == "Kitchen":
-        kitchen_screen(tenant_id)
 
     elif page == "Reception":
         reception_screen(tenant_id)
