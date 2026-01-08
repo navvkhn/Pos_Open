@@ -27,10 +27,7 @@ def settings(tenant_id):
             supabase.storage.from_("branding").upload(
                 logo_path,
                 logo.getvalue(),
-                {
-                    "content-type": logo.type,
-                    "upsert": True
-                }
+                {"upsert": True}
             )
             updates["logo_url"] = (
                 supabase.storage.from_("branding")
@@ -43,10 +40,7 @@ def settings(tenant_id):
             supabase.storage.from_("branding").upload(
                 qr_path,
                 upi_qr.getvalue(),
-                {
-                    "content-type": upi_qr.type,
-                    "upsert": True
-                }
+                {"upsert": True}
             )
             updates["upi_qr_url"] = (
                 supabase.storage.from_("branding")
