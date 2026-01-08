@@ -9,6 +9,17 @@ def products(tenant_id):
         price = st.number_input("Price", min_value=0.0)
         category = st.text_input("Category")
         submit = st.form_submit_button("Add")
+image = st.file_uploader("Product Image", type=["jpg", "png"])
+
+if image:
+    file = supabase.storage.from_("product-images").upload(
+        f"{tenant_id}/{image.name}",
+        image.getvalue(),
+        {"content-type": image.type}
+    )
+    image_url = supabase.storage.from_("product-images").get_public_url(
+        f"{tenant_id}/{image.name}"
+    )
 
         if submit:
             supabase.table("products").insert({
