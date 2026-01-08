@@ -5,6 +5,48 @@ from postgrest.exceptions import APIError
 
 def reception_screen(tenant_id):
     st.title("🧾 Reception / Cashier")
+    # --------------------------------------------------
+# 📊 TOP DASHBOARD METRICS
+# --------------------------------------------------
+today_ist = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+today_utc = today_ist.astimezone(pytz.utc)
+
+unpaid = supabase.table("orders") \
+    .select("id", count="exact") \
+    .eq("tenant_id", tenant_id) \
+    .eq("payment_status", "pending") \
+    .execute()
+
+open_orders = supabase.table("orders") \
+    .select("id", count="exact") \
+    .eq("tenant_id", tenant_id) \
+    .eq("status", "open") \
+    .execute()
+
+prepared = supabase.table("orders") \
+    .select("id", count="exact") \
+    .eq("tenant_id", tenant_id) \
+    .eq("status", "prepared") \
+    .execute()
+
+today_paid = supabase.table("orders") \
+    .select("total") \
+    .eq("tenant_id", tenant_id) \
+    .eq("payment_status", "paid") \
+    .gte("created_at", today_utc.isoformat()) \
+    .execute()
+
+today_revenue = sum(o["total"] for o in today_paid.data)
+
+c1, c2, c3, c4 = st.columns(4)
+
+c1.metric("💳 Unpaid Orders", unpaid.count)
+c2.metric("🕒 Open Orders", open_orders.count)
+c3.metric("🍳 Prepared", prepared.count)
+c4.metric("₹ Today Revenue", f"{today_revenue:.2f}")
+
+st.divider()
+
 
     orders = supabase.table("orders") \
         .select("*") \
