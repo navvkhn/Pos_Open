@@ -4,26 +4,35 @@ from passlib.hash import pbkdf2_sha256
 from .signup import signup
 
 def login():
-    st.title("🔐 Superscale POS")
+    st.title("🔐 Superscale POS Login")
 
     tab1, tab2 = st.tabs(["Login", "Signup"])
 
     with tab1:
-        restaurant = st.text_input("Restaurant Name", key="login_restaurant")
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
+        # -----------------------------
+        # Fetch restaurants
+        # -----------------------------
+        tenants = supabase.table("tenants") \
+            .select("id,name") \
+            .order("name") \
+            .execute()
+
+        if not tenants.data:
+            st.warning("No restaurants found. Please sign up.")
+            return
+
+        tenant_map = {t["name"]: t["id"] for t in tenants.data}
+
+        restaurant = st.selectbox(
+            "Select Restaurant",
+            options=list(tenant_map.keys())
+        )
+
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
 
         if st.button("Login"):
-            tenant = supabase.table("tenants") \
-                .select("id,name") \
-                .eq("name", restaurant) \
-                .execute()
-
-            if not tenant.data:
-                st.error("Restaurant not found")
-                return
-
-            tenant_id = tenant.data[0]["id"]
+            tenant_id = tenant_map[restaurant]
 
             user = supabase.table("users") \
                 .select("*") \
@@ -39,6 +48,9 @@ def login():
                 st.error("Invalid credentials")
                 return
 
+            # -----------------------------
+            # Login success
+            # -----------------------------
             st.session_state.user = {
                 "tenant_id": tenant_id,
                 "tenant": restaurant,
@@ -46,7 +58,7 @@ def login():
                 "role": user.data[0]["role"]
             }
 
-            st.success("Logged in")
+            st.success("Logged in successfully")
             st.rerun()
 
     with tab2:
