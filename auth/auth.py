@@ -16,10 +16,7 @@ def login():
 
         if st.button("Login"):
             db = SessionLocal()
-
-            tenant = db.query(Tenant).filter(
-                Tenant.name == tenant_name
-            ).first()
+            tenant = db.query(Tenant).filter(Tenant.name == tenant_name).first()
 
             if not tenant:
                 st.error("Restaurant not found")
@@ -37,7 +34,6 @@ def login():
                     "tenant_id": tenant.id,
                     "tenant": tenant.name
                 }
-                st.success("Logged in")
                 st.rerun()
             else:
                 st.error("Invalid credentials")
