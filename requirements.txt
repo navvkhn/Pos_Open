@@ -4,3 +4,4 @@ passlib
 python-dotenv
 qrcode
 pillow
+reportlab
