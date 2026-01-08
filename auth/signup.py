@@ -1,6 +1,5 @@
 import streamlit as st
-from db import SessionLocal
-from models import Tenant, User
+from supabase_client import supabase
 from passlib.hash import pbkdf2_sha256
 
 def signup():
@@ -11,49 +10,34 @@ def signup():
     password = st.text_input("Password", type="password", key="signup_password")
     confirm = st.text_input("Confirm Password", type="password", key="signup_confirm")
 
-
     if st.button("Create Account"):
-        if not restaurant or not username or not password:
-            st.error("All fields are required")
-            return
-
         if password != confirm:
             st.error("Passwords do not match")
             return
 
-        db = SessionLocal()
+        # Check tenant
+        existing = supabase.table("tenants") \
+            .select("id") \
+            .eq("name", restaurant) \
+            .execute()
 
-        # Check if tenant exists
-        existing = db.query(Tenant).filter(Tenant.name == restaurant).first()
-        if existing:
+        if existing.data:
             st.error("Restaurant already exists")
             return
 
         # Create tenant
-        tenant = Tenant(name=restaurant)
-        db.add(tenant)
-        db.commit()
-        db.refresh(tenant)
+        tenant = supabase.table("tenants") \
+            .insert({"name": restaurant}) \
+            .execute()
+
+        tenant_id = tenant.data[0]["id"]
 
         # Create admin user
-        hashed = pbkdf2_sha256.hash(password)
-        user = User(
-            tenant_id=tenant.id,
-            username=username,
-            password=hashed,
-            role="admin"
-        )
-
-        db.add(user)
-        db.commit()
-
-        # Auto login
-        st.session_state.user = {
+        supabase.table("users").insert({
+            "tenant_id": tenant_id,
             "username": username,
-            "role": "admin",
-            "tenant_id": tenant.id,
-            "tenant": tenant.name
-        }
+            "password": pbkdf2_sha256.hash(password),
+            "role": "admin"
+        }).execute()
 
-        st.success("🎉 Account created successfully")
-        st.rerun()
+        st.success("Account created. Please login.")
