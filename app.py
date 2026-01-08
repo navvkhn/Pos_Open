@@ -4,11 +4,18 @@ from admin.products import products
 from admin.reports import reports
 from utils.qr import generate_qr
 import streamlit as st
+import streamlit as st
+from customer.menu import customer_menu
 
 APP_URL = st.secrets.get(
     "APP_URL",
     "https://posbynaved.streamlit.app/"
 )
+query = st.query_params
+
+if "menu" in query:
+    customer_menu(query["menu"])
+    st.stop()
 
 
 st.set_page_config(page_title="Superscale POS", layout="wide")
