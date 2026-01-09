@@ -1,16 +1,20 @@
 import streamlit as st
 import pandas as pd
 from supabase_client import supabase
-from datetime import date
+from datetime import date, datetime
+import pytz
+
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def reports(tenant_id):
     st.title("📊 Business Reports & Insights")
 
     # --------------------------------------------------
-    # Date Filter
+    # 📅 DATE FILTER (IST → UTC SAFE)
     # --------------------------------------------------
     col1, col2 = st.columns(2)
+
     with col1:
         start_date = st.date_input("From Date", value=date.today())
     with col2:
@@ -20,14 +24,27 @@ def reports(tenant_id):
         st.error("Start date cannot be after end date")
         return
 
+    start_ist = datetime.combine(start_date, datetime.min.time()).astimezone(IST)
+    end_ist = datetime.combine(end_date, datetime.max.time()).astimezone(IST)
+
+    start_utc = start_ist.astimezone(pytz.utc).isoformat()
+    end_utc = end_ist.astimezone(pytz.utc).isoformat()
+
     # --------------------------------------------------
-    # Fetch orders
+    # 🧾 FETCH ORDERS (TENANT LOCKED)
     # --------------------------------------------------
     orders = supabase.table("orders") \
-        .select("*") \
+        .select("""
+            id,
+            tenant_id,
+            total,
+            discount_amount,
+            discount_percent,
+            created_at
+        """) \
         .eq("tenant_id", tenant_id) \
-        .gte("created_at", f"{start_date}T00:00:00") \
-        .lte("created_at", f"{end_date}T23:59:59") \
+        .gte("created_at", start_utc) \
+        .lte("created_at", end_utc) \
         .execute()
 
     if not orders.data:
@@ -35,56 +52,69 @@ def reports(tenant_id):
         return
 
     orders_df = pd.DataFrame(orders.data)
-
-    # Fill null discounts
     orders_df["discount_amount"] = orders_df["discount_amount"].fillna(0)
 
     # --------------------------------------------------
-    # KPIs
+    # 📊 KPIs
     # --------------------------------------------------
     total_revenue = orders_df["total"].sum()
     total_discount = orders_df["discount_amount"].sum()
     total_orders = len(orders_df)
+
     avg_order_value = total_revenue / total_orders if total_orders else 0
     avg_discount = total_discount / total_orders if total_orders else 0
-    discount_ratio = (total_discount / (total_revenue + total_discount)) * 100 if total_revenue else 0
+    discount_ratio = (
+        (total_discount / (total_revenue + total_discount)) * 100
+        if total_revenue else 0
+    )
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("💰 Revenue (After Discount)", f"₹ {total_revenue:.2f}")
-    col2.metric("💸 Total Discount Given", f"₹ {total_discount:.2f}")
-    col3.metric("📦 Avg Order Value", f"₹ {avg_order_value:.2f}")
-    col4.metric("🏷 Avg Discount / Order", f"₹ {avg_discount:.2f}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("💰 Revenue (After Discount)", f"₹ {total_revenue:.2f}")
+    c2.metric("💸 Total Discount Given", f"₹ {total_discount:.2f}")
+    c3.metric("📦 Avg Order Value", f"₹ {avg_order_value:.2f}")
+    c4.metric("🏷 Avg Discount / Order", f"₹ {avg_discount:.2f}")
 
     st.caption(f"📉 Discount = {discount_ratio:.1f}% of gross revenue")
-
     st.divider()
 
     # --------------------------------------------------
-    # Discount vs No Discount
+    # 🟢 DISCOUNTED vs NON-DISCOUNTED ORDERS
     # --------------------------------------------------
     discount_orders = orders_df[orders_df["discount_amount"] > 0]
     no_discount_orders = orders_df[orders_df["discount_amount"] == 0]
 
-    col1, col2 = st.columns(2)
-    col1.metric("🟢 Orders with Discount", len(discount_orders))
-    col2.metric("⚪ Orders without Discount", len(no_discount_orders))
+    c1, c2 = st.columns(2)
+    c1.metric("🟢 Orders with Discount", len(discount_orders))
+    c2.metric("⚪ Orders without Discount", len(no_discount_orders))
 
     st.divider()
 
     # --------------------------------------------------
-    # Fetch order items
+    # 🍽 FETCH ORDER ITEMS (TENANT SAFE JOIN)
     # --------------------------------------------------
     order_ids = orders_df["id"].tolist()
 
     items = supabase.table("order_items") \
-        .select("*") \
+        .select("""
+            product_name,
+            quantity,
+            price,
+            orders!inner (
+                tenant_id
+            )
+        """) \
         .in_("order_id", order_ids) \
+        .eq("orders.tenant_id", tenant_id) \
         .execute()
+
+    if not items.data:
+        st.info("No item data available")
+        return
 
     items_df = pd.DataFrame(items.data)
 
     # --------------------------------------------------
-    # Product Insights
+    # 🏆 PRODUCT INSIGHTS
     # --------------------------------------------------
     product_summary = (
         items_df
@@ -99,11 +129,10 @@ def reports(tenant_id):
 
     st.subheader("🏆 Top Products")
     st.dataframe(product_summary.head(10), use_container_width=True)
-
     st.divider()
 
     # --------------------------------------------------
-    # Daily Revenue & Discount Trend
+    # 📈 DAILY TRENDS
     # --------------------------------------------------
     orders_df["date"] = pd.to_datetime(orders_df["created_at"]).dt.date
 
@@ -119,9 +148,7 @@ def reports(tenant_id):
     )
 
     st.subheader("📈 Daily Revenue vs Discount")
-    st.line_chart(
-        daily.set_index("date")[["revenue", "discount"]]
-    )
+    st.line_chart(daily.set_index("date")[["revenue", "discount"]])
 
     st.subheader("📊 Daily Orders Count")
     st.bar_chart(daily.set_index("date")["orders"])
@@ -129,21 +156,21 @@ def reports(tenant_id):
     st.divider()
 
     # --------------------------------------------------
-    # CSV Export (WITH DISCOUNTS)
+    # 📥 CSV EXPORT
     # --------------------------------------------------
     st.subheader("📥 Export Data")
 
-    col1, col2 = st.columns(2)
+    c1, c2 = st.columns(2)
 
-    with col1:
+    with c1:
         st.download_button(
             "⬇️ Download Orders CSV",
             data=orders_df.to_csv(index=False),
-            file_name="orders_with_discounts.csv",
+            file_name="orders_report.csv",
             mime="text/csv"
         )
 
-    with col2:
+    with c2:
         st.download_button(
             "⬇️ Download Product Sales CSV",
             data=product_summary.to_csv(index=False),
