@@ -12,23 +12,24 @@ time.sleep(0.2)
 # --------------------------------------------------
 def calculate_game_amount(game):
     start = datetime.fromisoformat(game["start_time"].replace("Z", ""))
-    end = datetime.utcnow()
+    now = datetime.utcnow()
 
-    paused_seconds = game.get("paused_seconds", 0)
-
+    # handle pause
     if game["status"] == "paused" and game.get("paused_at"):
-        end = datetime.fromisoformat(game["paused_at"].replace("Z", ""))
+        now = datetime.fromisoformat(game["paused_at"].replace("Z", ""))
 
-    elapsed_seconds = max(0, int((end - start).total_seconds() - paused_seconds))
+    elapsed_seconds = max(0, int((now - start).total_seconds()))
 
     hours = elapsed_seconds // 3600
     minutes = (elapsed_seconds % 3600) // 60
     seconds = elapsed_seconds % 60
 
-    rate = float(game["rate_per_hour"])
-    amount = round((elapsed_seconds / 3600) * rate, 2)
+    rate_30 = float(game["rate_per_30_min"])
+    rate_per_hour = rate_30 * 2
 
-    return elapsed_seconds, hours, minutes, seconds, amount
+    amount = round((elapsed_seconds / 3600) * rate_per_hour, 2)
+
+    return hours, minutes, seconds, rate_per_hour, amount
 
 
 # --------------------------------------------------
@@ -76,7 +77,6 @@ def reception_screen(tenant_id):
                 "status": "open",
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
-
             st.success("Order created")
             st.rerun()
 
@@ -120,12 +120,12 @@ def reception_screen(tenant_id):
             food_total = 0.0
 
             for item in order.get("order_items", []):
-                c = st.columns([4, 1, 1])
-                c[0].write(f"{item['product_name']} × {item['quantity']}")
-                c[1].write(f"₹{item['price']:.2f}")
+                cols = st.columns([4, 1, 1])
+                cols[0].write(f"{item['product_name']} × {item['quantity']}")
+                cols[1].write(f"₹{item['price']:.2f}")
                 food_total += float(item["price"])
 
-                if is_open and c[2].button("❌", key=f"del_{item['id']}"):
+                if is_open and cols[2].button("❌", key=f"del_{item['id']}"):
                     supabase.table("order_items").delete().eq("id", item["id"]).execute()
                     st.rerun()
 
@@ -150,14 +150,14 @@ def reception_screen(tenant_id):
             game_res = supabase.table("games") \
                 .select("*") \
                 .eq("order_id", order_id) \
-                .order("start_time", desc=True) \
+                .order("created_at", desc=True) \
                 .limit(1) \
                 .execute()
 
             game = game_res.data[0] if game_res.data else None
 
             if not game and is_open:
-                rate = st.number_input(
+                rate_per_hour = st.number_input(
                     "Pool Price (₹ / Hour)",
                     min_value=0,
                     step=50,
@@ -169,18 +169,18 @@ def reception_screen(tenant_id):
                     supabase.table("games").insert({
                         "tenant_id": tenant_id,
                         "order_id": order_id,
-                        "rate_per_30_min": rate / 2,  # convert hour → 30 min
+                        "game_type": "pool",
+                        "rate_per_30_min": rate_per_hour / 2,
                         "start_time": datetime.utcnow().isoformat(),
-                        "paused_seconds": 0,
                         "status": "running"
                     }).execute()
                     st.rerun()
 
             if game:
-                elapsed, h, m, s, game_amount = calculate_game_amount(game)
+                h, m, s, rate_hr, game_amount = calculate_game_amount(game)
 
-                st.write(f"⏱ {h:02d}h {m:02d}m {s:02d}s")
-                st.write(f"💲 Rate: ₹{game['rate_per_hour']} / hour")
+                st.write(f"⏱ {h:02d} Hours {m:02d} Minutes {s:02d} Seconds")
+                st.write(f"💲 Rate: ₹{rate_hr} / hour")
                 st.write(f"💰 Game Total: ₹{game_amount}")
 
             # ---------------- DELETE ORDER ----------------
