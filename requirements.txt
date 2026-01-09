@@ -1,7 +1,7 @@
-streamlit
-supabase
-passlib
-python-dotenv
-qrcode
-pillow
-reportlab
+streamlit>=1.28.0
+pymongo>=4.5.0
+python-dotenv>=1.0.0
+pandas>=2.1.0
+plotly>=5.17.0
+Pillow>=10.0.0
+python-dateutil>=2.8.2
