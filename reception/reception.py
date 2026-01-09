@@ -115,7 +115,46 @@ def reception_screen(tenant_id):
         with st.expander(f"🧾 Order – {order.get('table_name') or order_id}"):
             st.markdown("<div class='order-box'>", unsafe_allow_html=True)
 
+            # ==================================================
+            # ✏️ EDIT CUSTOMER / TABLE NAME (NEW)
+            # ==================================================
+            st.subheader("✏️ Order Details")
+
+            col_a, col_b = st.columns(2)
+
+            customer_name = col_a.text_input(
+                "Customer Name",
+                value=order.get("customer_name") or "",
+                disabled=not is_open,
+                key=f"cust_{order_id}"
+            )
+
+            table_name = col_b.text_input(
+                "Table Name",
+                value=order.get("table_name") or "",
+                disabled=not is_open,
+                key=f"table_{order_id}"
+            )
+
+            if is_open and st.button("💾 Save Details", key=f"save_details_{order_id}"):
+                update_payload = {
+                    "table_name": table_name
+                }
+
+                # update customer_name only if column exists
+                if "customer_name" in order:
+                    update_payload["customer_name"] = customer_name
+
+                supabase.table("orders") \
+                    .update(update_payload) \
+                    .eq("id", order_id) \
+                    .execute()
+
+                st.success("Order details updated")
+                st.rerun()
+
             # ---------------- FOOD ----------------
+            st.divider()
             st.subheader("🍔 Food Items")
             food_total = 0.0
 
@@ -193,13 +232,11 @@ def reception_screen(tenant_id):
 
             # ---------------- PAY & CLOSE ----------------
             if is_open and st.button("💳 Mark as Paid & Close Order", key=f"pay_{order_id}", type="primary"):
-                # Stop game
                 if game:
                     supabase.table("games").update({
                         "status": "billed"
                     }).eq("id", game["id"]).execute()
 
-                # Close order
                 supabase.table("orders").update({
                     "status": "completed"
                 }).eq("id", order_id).execute()
