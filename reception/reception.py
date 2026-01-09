@@ -201,9 +201,7 @@ def reception_screen(tenant_id):
 
                 # Close order
                 supabase.table("orders").update({
-                    "status": "completed",
-                    "total": grand_total,
-                    "paid_at": datetime.utcnow().isoformat()
+                    "status": "completed"
                 }).eq("id", order_id).execute()
 
                 st.success("✅ Payment received. Order closed.")
