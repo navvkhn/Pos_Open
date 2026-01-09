@@ -8,15 +8,20 @@ IST = pytz.timezone("Asia/Kolkata")
 time.sleep(0.2)
 
 # --------------------------------------------------
-# 🧠 HELPERS
+# 🧠 TIME HELPERS (CRITICAL FIX)
 # --------------------------------------------------
-def calculate_game_amount(game):
-    start = datetime.fromisoformat(game["start_time"].replace("Z", ""))
-    now = datetime.utcnow()
+def parse_utc(dt):
+    if isinstance(dt, str):
+        return datetime.fromisoformat(dt.replace("Z", "")).replace(tzinfo=None)
+    return dt.replace(tzinfo=None)
 
-    # handle pause
+
+def calculate_game_amount(game):
+    start = parse_utc(game["start_time"])
+    now = datetime.utcnow().replace(tzinfo=None)
+
     if game["status"] == "paused" and game.get("paused_at"):
-        now = datetime.fromisoformat(game["paused_at"].replace("Z", ""))
+        now = parse_utc(game["paused_at"])
 
     elapsed_seconds = max(0, int((now - start).total_seconds()))
 
@@ -157,7 +162,7 @@ def reception_screen(tenant_id):
             game = game_res.data[0] if game_res.data else None
 
             if not game and is_open:
-                rate_per_hour = st.number_input(
+                rate_hr = st.number_input(
                     "Pool Price (₹ / Hour)",
                     min_value=0,
                     step=50,
@@ -170,7 +175,7 @@ def reception_screen(tenant_id):
                         "tenant_id": tenant_id,
                         "order_id": order_id,
                         "game_type": "pool",
-                        "rate_per_30_min": rate_per_hour / 2,
+                        "rate_per_30_min": rate_hr / 2,
                         "start_time": datetime.utcnow().isoformat(),
                         "status": "running"
                     }).execute()
