@@ -8,7 +8,7 @@ IST = pytz.timezone("Asia/Kolkata")
 time.sleep(0.2)
 
 # --------------------------------------------------
-# 🧠 TIME HELPERS (CRITICAL FIX)
+# 🧠 TIME HELPERS
 # --------------------------------------------------
 def parse_utc(dt):
     if isinstance(dt, str):
@@ -25,16 +25,11 @@ def calculate_game_amount(game):
 
     elapsed_seconds = max(0, int((now - start).total_seconds()))
 
-    hours = elapsed_seconds // 3600
-    minutes = (elapsed_seconds % 3600) // 60
-    seconds = elapsed_seconds % 60
-
     rate_30 = float(game["rate_per_30_min"])
     rate_per_hour = rate_30 * 2
-
     amount = round((elapsed_seconds / 3600) * rate_per_hour, 2)
 
-    return hours, minutes, seconds, rate_per_hour, amount
+    return elapsed_seconds, rate_per_hour, amount
 
 
 # --------------------------------------------------
@@ -160,6 +155,12 @@ def reception_screen(tenant_id):
                 .execute()
 
             game = game_res.data[0] if game_res.data else None
+            game_amount = 0.0
+
+            if game:
+                _, rate_hr, game_amount = calculate_game_amount(game)
+                st.write(f"💲 Rate: ₹{rate_hr} / hour")
+                st.write(f"💰 Game Total: ₹{game_amount}")
 
             if not game and is_open:
                 rate_hr = st.number_input(
@@ -169,7 +170,6 @@ def reception_screen(tenant_id):
                     value=200,
                     key=f"rate_{order_id}"
                 )
-
                 if st.button("🎱 Start Pool", key=f"start_{order_id}"):
                     supabase.table("games").insert({
                         "tenant_id": tenant_id,
@@ -181,12 +181,33 @@ def reception_screen(tenant_id):
                     }).execute()
                     st.rerun()
 
-            if game:
-                h, m, s, rate_hr, game_amount = calculate_game_amount(game)
+            # ---------------- FINAL BILL ----------------
+            st.divider()
+            st.subheader("🧾 Final Bill")
 
-                st.write(f"⏱ {h:02d} Hours {m:02d} Minutes {s:02d} Seconds")
-                st.write(f"💲 Rate: ₹{rate_hr} / hour")
-                st.write(f"💰 Game Total: ₹{game_amount}")
+            grand_total = round(food_total + game_amount, 2)
+
+            st.write(f"🍔 Food Total: ₹{food_total:.2f}")
+            st.write(f"🎱 Pool Total: ₹{game_amount:.2f}")
+            st.write(f"💰 **Grand Total: ₹{grand_total:.2f}**")
+
+            # ---------------- PAY & CLOSE ----------------
+            if is_open and st.button("💳 Mark as Paid & Close Order", key=f"pay_{order_id}", type="primary"):
+                # Stop game
+                if game:
+                    supabase.table("games").update({
+                        "status": "billed"
+                    }).eq("id", game["id"]).execute()
+
+                # Close order
+                supabase.table("orders").update({
+                    "status": "completed",
+                    "total": grand_total,
+                    "paid_at": datetime.utcnow().isoformat()
+                }).eq("id", order_id).execute()
+
+                st.success("✅ Payment received. Order closed.")
+                st.rerun()
 
             # ---------------- DELETE ORDER ----------------
             if is_open and st.button("🗑 Delete Order", key=f"delete_{order_id}"):
