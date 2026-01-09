@@ -12,7 +12,7 @@ def reception_screen(tenant_id):
     st.title("🧾 Reception / Cashier")
 
     # --------------------------------------------------
-    # 🎨 MOBILE + DARK MODE SAFE CSS
+    # 🎨 CSS
     # --------------------------------------------------
     st.markdown("""
     <style>
@@ -20,8 +20,8 @@ def reception_screen(tenant_id):
         background-color: var(--secondary-background-color);
         border: 1px solid rgba(128,128,128,0.4);
         border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 14px;
+        padding: 14px;
+        margin-bottom: 16px;
     }
     button {
         min-height: 48px;
@@ -42,30 +42,7 @@ def reception_screen(tenant_id):
     today_utc = today_ist.astimezone(pytz.utc)
 
     # --------------------------------------------------
-    # 📊 METRICS
-    # --------------------------------------------------
-    unpaid = supabase.table("orders") \
-        .select("id", count="exact") \
-        .eq("tenant_id", tenant_id) \
-        .eq("payment_status", "pending") \
-        .gte("created_at", today_utc.isoformat()) \
-        .execute()
-
-    open_orders = supabase.table("orders") \
-        .select("id", count="exact") \
-        .eq("tenant_id", tenant_id) \
-        .eq("status", "open") \
-        .gte("created_at", today_utc.isoformat()) \
-        .execute()
-
-    c1, c2 = st.columns(2)
-    c1.metric("💳 Unpaid", unpaid.count)
-    c2.metric("🕒 Open Orders", open_orders.count)
-
-    st.divider()
-
-    # --------------------------------------------------
-    # 🧾 FETCH TODAY ORDERS + ITEMS
+    # 🧾 FETCH TODAY ORDERS
     # --------------------------------------------------
     orders = supabase.table("orders") \
         .select("""
@@ -82,24 +59,29 @@ def reception_screen(tenant_id):
         .order("created_at", desc=True) \
         .execute()
 
-    if not orders.data:
-        st.info("No orders today")
-        return
+    # --------------------------------------------------
+    # 🎱 FETCH TODAY GAMES
+    # --------------------------------------------------
+    games = supabase.table("games") \
+        .select("*") \
+        .eq("tenant_id", tenant_id) \
+        .gte("created_at", today_utc.isoformat()) \
+        .execute()
 
     # --------------------------------------------------
-    # 📦 PRODUCTS (FOR ADDING ITEMS)
+    # 📦 PRODUCTS
     # --------------------------------------------------
     products = supabase.table("products") \
         .select("name, price") \
         .eq("tenant_id", tenant_id) \
         .eq("available", True) \
-        .order("name") \
         .execute()
 
-    product_map = {
-        p["name"]: float(p["price"])
-        for p in products.data
-    }
+    product_map = {p["name"]: float(p["price"]) for p in products.data}
+
+    if not orders.data:
+        st.info("No orders today")
+        return
 
     # --------------------------------------------------
     # 🧾 ORDERS LOOP
@@ -107,174 +89,149 @@ def reception_screen(tenant_id):
     for order in orders.data:
         order_id = order["id"]
         order_no = order.get("order_number", order_id)
-        is_open = order.get("status") == "open"
+        is_open = order["status"] == "open"
 
-        discount_percent_db = float(order.get("discount_percent") or 0)
-        discount_amount_db = float(order.get("discount_amount") or 0)
-
-        header = f"Order #{order_no}"
-
-        with st.expander(header):
+        with st.expander(f"🧾 Order #{order_no}"):
             st.markdown("<div class='order-box'>", unsafe_allow_html=True)
 
-            # --------------------------------------------------
-            # 🍽 TABLE NUMBER (RESTORED ✅)
-            # --------------------------------------------------
+            # -----------------------------
+            # 🍽 TABLE NUMBER
+            # -----------------------------
             table_name = st.text_input(
-                "🍽 Table Number / Name",
+                "🍽 Table Number",
                 value=order.get("table_name") or "",
                 disabled=not is_open,
                 key=f"table_{order_id}"
             )
 
-            st.divider()
+            # -----------------------------
+            # 🍔 FOOD ITEMS
+            # -----------------------------
+            st.subheader("🍔 Food Items")
 
-            # --------------------------------------------------
-            # 🧾 ITEMS
-            # --------------------------------------------------
-            st.subheader("🧾 Items")
-
-            subtotal = 0.0
+            food_subtotal = 0.0
 
             for item in order.get("order_items", []):
                 cols = st.columns([4, 1, 1])
-
                 cols[0].write(
                     f"{item['product_name']} × {item['quantity']}"
                 )
-
                 cols[1].write(f"₹{item['price']:.2f}")
-                subtotal += float(item["price"])
+                food_subtotal += float(item["price"])
 
-                if is_open:
-                    if cols[2].button("❌", key=f"del_{item['id']}"):
-                        supabase.table("order_items") \
-                            .delete() \
-                            .eq("id", item["id"]) \
-                            .execute()
-                        st.rerun()
-
-            # --------------------------------------------------
-            # ➕ ADD ITEM
-            # --------------------------------------------------
-            if is_open and product_map:
-                st.divider()
-                st.subheader("➕ Add Item")
-
-                col1, col2, col3 = st.columns([3, 1, 1])
-
-                product_name = col1.selectbox(
-                    "Product",
-                    options=list(product_map.keys()),
-                    key=f"prod_{order_id}"
-                )
-
-                qty = col2.number_input(
-                    "Qty",
-                    min_value=1,
-                    step=1,
-                    key=f"qty_{order_id}"
-                )
-
-                if col3.button("Add", key=f"add_{order_id}"):
-                    price = product_map[product_name] * qty
-
-                    supabase.table("order_items").insert({
-                        "order_id": order_id,
-                        "product_name": product_name,
-                        "quantity": qty,
-                        "price": price
-                    }).execute()
-
+                if is_open and cols[2].button("❌", key=f"del_{item['id']}"):
+                    supabase.table("order_items") \
+                        .delete() \
+                        .eq("id", item["id"]) \
+                        .execute()
                     st.rerun()
 
-            # --------------------------------------------------
-            # 🏷 DISCOUNT
-            # --------------------------------------------------
-            st.divider()
-            st.subheader("🏷 Discount")
-
-            if is_open:
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    discount_percent_input = st.number_input(
-                        "Discount %",
-                        0.0, 100.0,
-                        value=discount_percent_db,
-                        step=1.0,
-                        key=f"dp_{order_id}"
-                    )
-
-                with col2:
-                    discount_amount_input = st.number_input(
-                        "Discount ₹",
-                        0.0, subtotal,
-                        value=discount_amount_db,
-                        step=1.0,
-                        key=f"da_{order_id}"
-                    )
-            else:
-                discount_percent_input = discount_percent_db
-                discount_amount_input = discount_amount_db
-
-            # --------------------------------------------------
-            # 🧮 CALCULATION
-            # --------------------------------------------------
-            if discount_percent_input > 0:
-                final_discount_amount = round(
-                    subtotal * discount_percent_input / 100, 2
+            # -----------------------------
+            # ➕ ADD FOOD ITEM
+            # -----------------------------
+            if is_open and product_map:
+                st.divider()
+                col1, col2, col3 = st.columns([3, 1, 1])
+                product = col1.selectbox(
+                    "Add Item",
+                    list(product_map.keys()),
+                    key=f"prod_{order_id}"
                 )
-                final_discount_percent = discount_percent_input
-            elif discount_amount_input > 0:
-                final_discount_amount = discount_amount_input
-                final_discount_percent = round(
-                    (final_discount_amount / subtotal) * 100, 2
-                ) if subtotal else 0
-            else:
-                final_discount_amount = 0.0
-                final_discount_percent = 0.0
+                qty = col2.number_input(
+                    "Qty", 1, step=1, key=f"qty_{order_id}"
+                )
+                if col3.button("Add", key=f"add_{order_id}"):
+                    supabase.table("order_items").insert({
+                        "order_id": order_id,
+                        "product_name": product,
+                        "quantity": qty,
+                        "price": qty * product_map[product]
+                    }).execute()
+                    st.rerun()
 
-            final_total = round(subtotal - final_discount_amount, 2)
+            # -----------------------------
+            # 🎱 GAME BILL (COMBINED)
+            # -----------------------------
+            st.divider()
+            st.subheader("🎱 Pool Game")
+
+            game = next(
+                (g for g in games.data if g.get("status") in ["running", "paused", "stopped"]),
+                None
+            )
+
+            game_amount = 0.0
+
+            if game:
+                game_amount = float(game.get("total_amount") or 0)
+                st.write(
+                    f"Duration: {game.get('total_minutes', 0)} mins"
+                )
+                st.write(
+                    f"Game Amount: ₹{game_amount:.2f}"
+                )
+            else:
+                st.info("No pool game linked")
+
+            # -----------------------------
+            # 🧮 COMBINED BILL
+            # -----------------------------
+            combined_subtotal = food_subtotal + game_amount
+
+            discount_percent = st.number_input(
+                "Discount %",
+                0.0, 100.0,
+                value=float(order.get("discount_percent") or 0),
+                step=1.0,
+                disabled=not is_open,
+                key=f"dp_{order_id}"
+            )
+
+            discount_amount = round(
+                combined_subtotal * discount_percent / 100, 2
+            )
+
+            final_total = round(
+                combined_subtotal - discount_amount, 2
+            )
 
             st.markdown(
                 f"""
-                **Subtotal:** ₹{subtotal:.2f}  
-                **Discount:** ₹{final_discount_amount:.2f} ({final_discount_percent:.2f}%)  
+                **Food:** ₹{food_subtotal:.2f}  
+                **Game:** ₹{game_amount:.2f}  
+                **Subtotal:** ₹{combined_subtotal:.2f}  
+                **Discount:** ₹{discount_amount:.2f}  
                 **Total:** ₹{final_total:.2f}
                 """
             )
 
-            # --------------------------------------------------
-            # 💾 SAVE BILL (TABLE + DISCOUNT + TOTAL)
-            # --------------------------------------------------
-            if is_open:
-                if st.button("💾 Save Bill", key=f"save_{order_id}", use_container_width=True):
-                    supabase.table("orders") \
-                        .update({
-                            "table_name": table_name,  # ✅ FIXED
-                            "discount_percent": float(final_discount_percent),
-                            "discount_amount": float(final_discount_amount),
-                            "total": float(final_total)
-                        }) \
-                        .eq("id", order_id) \
-                        .eq("status", "open") \
-                        .execute()
+            # -----------------------------
+            # 💾 SAVE BILL
+            # -----------------------------
+            if is_open and st.button("💾 Save Bill", use_container_width=True):
+                supabase.table("orders").update({
+                    "table_name": table_name,
+                    "discount_percent": discount_percent,
+                    "discount_amount": discount_amount,
+                    "total": final_total
+                }).eq("id", order_id).execute()
 
-                    st.success("✅ Bill updated")
-                    st.rerun()
+                if game:
+                    supabase.table("games").update({
+                        "status": "billed"
+                    }).eq("id", game["id"]).execute()
 
-            st.divider()
+                st.success("Bill saved")
+                st.rerun()
 
-            # --------------------------------------------------
+            # -----------------------------
             # 🚫 CLOSE ORDER
-            # --------------------------------------------------
-            if is_open:
-                if st.button("🚫 Close Order", key=f"close_{order_id}", use_container_width=True):
-                    supabase.table("orders") \
-                        .update({"status": "completed"}) \
-                        .eq("id", order_id) \
-                        .execute()
-                    st.rerun()
+            # -----------------------------
+            if is_open and st.button("🚫 Close Order", use_container_width=True):
+                supabase.table("orders") \
+                    .update({"status": "completed"}) \
+                    .eq("id", order_id) \
+                    .execute()
+                st.rerun()
 
             st.markdown("</div>", unsafe_allow_html=True)
