@@ -61,14 +61,12 @@ def reception_screen(tenant_id):
     st.subheader("➕ Create New Order")
 
     c1, c2 = st.columns([3, 1])
-
     with c1:
         new_table = st.text_input(
             "🍽 Table / Customer Name",
             placeholder="Table 5 / Walk-in / Rahul",
             key="new_table"
         )
-
     with c2:
         if st.button("➕ Create Order", use_container_width=True):
             supabase.table("orders").insert({
@@ -115,7 +113,68 @@ def reception_screen(tenant_id):
         with st.expander(f"🧾 Order – {order.get('table_name') or order_id}"):
             st.markdown("<div class='order-box'>", unsafe_allow_html=True)
 
-            # ---------------- GAME ----------------
+            # --------------------------------------------------
+            # ✏️ EDIT NAME / TABLE
+            # --------------------------------------------------
+            st.subheader("✏️ Order Details")
+            c1, c2 = st.columns(2)
+
+            cust_name = c1.text_input(
+                "Customer Name",
+                value=order.get("customer_name") or "",
+                disabled=not is_open,
+                key=f"cust_{order_id}"
+            )
+            table_name = c2.text_input(
+                "Table Name",
+                value=order.get("table_name") or "",
+                disabled=not is_open,
+                key=f"table_{order_id}"
+            )
+
+            if is_open and st.button("💾 Save Details", key=f"save_{order_id}"):
+                payload = {"table_name": table_name}
+                if "customer_name" in order:
+                    payload["customer_name"] = cust_name
+                supabase.table("orders").update(payload).eq("id", order_id).execute()
+                st.success("Details updated")
+                st.rerun()
+
+            # --------------------------------------------------
+            # 🍔 FOOD
+            # --------------------------------------------------
+            st.divider()
+            st.subheader("🍔 Food Items")
+            food_total = 0.0
+
+            for item in order.get("order_items", []):
+                cols = st.columns([4, 1, 1])
+                cols[0].write(f"{item['product_name']} × {item['quantity']}")
+                cols[1].write(f"₹{item['price']:.2f}")
+                food_total += float(item["price"])
+
+                if is_open and cols[2].button("❌", key=f"del_{item['id']}"):
+                    supabase.table("order_items").delete().eq("id", item["id"]).execute()
+                    st.rerun()
+
+            if is_open and product_map:
+                st.divider()
+                a, b, c = st.columns([3, 1, 1])
+                prod = a.selectbox("Add Item", list(product_map.keys()), key=f"p_{order_id}")
+                qty = b.number_input("Qty", 1, step=1, key=f"q_{order_id}")
+                if c.button("Add", key=f"add_{order_id}"):
+                    supabase.table("order_items").insert({
+                        "order_id": order_id,
+                        "product_name": prod,
+                        "quantity": qty,
+                        "price": qty * product_map[prod]
+                    }).execute()
+                    st.rerun()
+
+            # --------------------------------------------------
+            # 🎱 POOL GAME (WITH PAUSE / RESUME)
+            # --------------------------------------------------
+            st.divider()
             st.subheader("🎱 Pool Game")
 
             game_res = supabase.table("games") \
@@ -131,9 +190,8 @@ def reception_screen(tenant_id):
             if game:
                 _, rate_hr, game_amount = calculate_game_amount(game)
                 st.write(f"💲 Rate: ₹{rate_hr} / hour")
-                st.write(f"💰 Game Total: ₹{game_amount}")
+                st.write(f"💰 Game Total: ₹{game_amount:.2f}")
 
-                # ▶⏸ PAUSE / RESUME CONTROLS (NEW)
                 if is_open:
                     if game["status"] == "running":
                         if st.button("⏸ Pause Pool", key=f"pause_{game['id']}"):
@@ -141,7 +199,6 @@ def reception_screen(tenant_id):
                                 "status": "paused",
                                 "paused_at": datetime.utcnow().isoformat()
                             }).eq("id", game["id"]).execute()
-                            st.success("Pool paused")
                             st.rerun()
 
                     elif game["status"] == "paused":
@@ -150,7 +207,6 @@ def reception_screen(tenant_id):
                                 "status": "running",
                                 "paused_at": None
                             }).eq("id", game["id"]).execute()
-                            st.success("Pool resumed")
                             st.rerun()
 
             if not game and is_open:
@@ -171,5 +227,34 @@ def reception_screen(tenant_id):
                         "status": "running"
                     }).execute()
                     st.rerun()
+
+            # --------------------------------------------------
+            # 🧾 FINAL BILL
+            # --------------------------------------------------
+            st.divider()
+            st.subheader("🧾 Final Bill")
+
+            grand_total = round(food_total + game_amount, 2)
+
+            st.write(f"🍔 Food Total: ₹{food_total:.2f}")
+            st.write(f"🎱 Pool Total: ₹{game_amount:.2f}")
+            st.write(f"💰 **Grand Total: ₹{grand_total:.2f}**")
+
+            if is_open and st.button("💳 Mark as Paid & Close Order", key=f"pay_{order_id}", type="primary"):
+                if game:
+                    supabase.table("games").update({"status": "billed"}).eq("id", game["id"]).execute()
+                supabase.table("orders").update({"status": "completed"}).eq("id", order_id).execute()
+                st.success("Order closed")
+                st.rerun()
+
+            # --------------------------------------------------
+            # 🗑 DELETE ORDER
+            # --------------------------------------------------
+            if is_open and st.button("🗑 Delete Order", key=f"delete_{order_id}"):
+                supabase.table("order_items").delete().eq("order_id", order_id).execute()
+                supabase.table("games").delete().eq("order_id", order_id).execute()
+                supabase.table("orders").delete().eq("id", order_id).execute()
+                st.success("Order deleted")
+                st.rerun()
 
             st.markdown("</div>", unsafe_allow_html=True)
