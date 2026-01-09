@@ -38,6 +38,9 @@ def calculate_game_amount(game):
 def reception_screen(tenant_id):
     st.title("🧾 Reception / Cashier")
 
+    # --------------------------------------------------
+    # 🎨 CSS
+    # --------------------------------------------------
     st.markdown("""
     <style>
     .order-box {
@@ -55,7 +58,7 @@ def reception_screen(tenant_id):
         st.rerun()
 
     # --------------------------------------------------
-    # ➕ CREATE NEW ORDER (WITH GAME RATE)
+    # ➕ CREATE NEW ORDER (ONLY META + GAME RATE)
     # --------------------------------------------------
     st.divider()
     st.subheader("➕ Create New Order")
@@ -70,17 +73,17 @@ def reception_screen(tenant_id):
         )
 
     with c2:
-        game_rate = st.number_input(
+        default_game_rate = st.number_input(
             "🎱 Pool Rate (₹ / 30 min)",
             min_value=0,
             step=50,
             value=100,
-            key="new_game_rate"
+            key="default_game_rate"
         )
 
     with c3:
-        if st.button("➕ Create Order", use_container_width=True):
-            order = supabase.table("orders").insert({
+        if st.button("➕ Create Order", use_container_width=True, key="create_order"):
+            supabase.table("orders").insert({
                 "tenant_id": tenant_id,
                 "table_name": new_table_name,
                 "status": "open",
@@ -88,6 +91,7 @@ def reception_screen(tenant_id):
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
 
+            st.session_state["last_game_rate"] = default_game_rate
             st.success("✅ Order created")
             st.rerun()
 
@@ -136,7 +140,7 @@ def reception_screen(tenant_id):
                 key=f"table_{order_id}"
             )
 
-            # ---------------- FOOD ---------------- #
+            # ---------------- FOOD (SAME AS CUSTOMER MENU) ---------------- #
             st.subheader("🍔 Food Items")
             food_total = 0.0
 
@@ -146,26 +150,42 @@ def reception_screen(tenant_id):
                 cols[1].write(f"₹{item['price']:.2f}")
                 food_total += float(item["price"])
 
-            # ---------------- GAME ---------------- #
+                if is_open and cols[2].button("❌", key=f"del_{item['id']}"):
+                    supabase.table("order_items") \
+                        .delete() \
+                        .eq("id", item["id"]) \
+                        .execute()
+                    st.rerun()
+
+            if is_open and product_map:
+                st.divider()
+                c1, c2, c3 = st.columns([3, 1, 1])
+                prod = c1.selectbox("Add Item", list(product_map.keys()), key=f"p_{order_id}")
+                qty = c2.number_input("Qty", 1, step=1, key=f"q_{order_id}")
+                if c3.button("Add", key=f"add_{order_id}"):
+                    supabase.table("order_items").insert({
+                        "order_id": order_id,
+                        "product_name": prod,
+                        "quantity": qty,
+                        "price": qty * product_map[prod]
+                    }).execute()
+                    st.rerun()
+
+            # ---------------- GAME (ONLY ADDITION) ---------------- #
             st.divider()
             st.subheader("🎱 Pool Game")
 
-            game = supabase.table("games") \
+            game_res = supabase.table("games") \
                 .select("*") \
                 .eq("order_id", order_id) \
                 .order("created_at", desc=True) \
                 .limit(1) \
                 .execute()
 
-            game = game.data[0] if game.data else None
+            game = game_res.data[0] if game_res.data else None
 
             if not game and is_open:
-                rate = st.number_input(
-                    "Game Rate (₹ / 30 min)",
-                    value=game_rate,
-                    step=50,
-                    key=f"rate_{order_id}"
-                )
+                rate = st.session_state.get("last_game_rate", 100)
 
                 if st.button("🎱 Start Pool Game", key=f"start_{order_id}"):
                     supabase.table("games").insert({
@@ -177,13 +197,37 @@ def reception_screen(tenant_id):
                         "paused_seconds": 0,
                         "status": "running"
                     }).execute()
+
+                    supabase.table("orders") \
+                        .update({"has_game": True}) \
+                        .eq("id", order_id) \
+                        .execute()
+
                     st.rerun()
 
             if game:
                 minutes, game_amount = calculate_game_amount(game)
 
                 st.write(f"⏱ {minutes} mins")
-                st.write(f"💰 ₹{game_amount}")
                 st.write(f"💲 Rate: ₹{game['rate_per_30_min']} / 30 min")
+                st.write(f"💰 Game Amount: ₹{game_amount}")
+
+                if game["status"] == "running" and st.button("⏸ Pause Game", key=f"pause_{order_id}"):
+                    supabase.table("games").update({
+                        "status": "paused",
+                        "paused_at": datetime.utcnow().isoformat()
+                    }).eq("id", game["id"]).execute()
+                    st.rerun()
+
+                if game["status"] == "paused" and st.button("▶ Resume Game", key=f"resume_{order_id}"):
+                    paused_at = datetime.fromisoformat(game["paused_at"].replace("Z", ""))
+                    paused_secs = (datetime.utcnow() - paused_at).total_seconds()
+
+                    supabase.table("games").update({
+                        "status": "running",
+                        "paused_at": None,
+                        "paused_seconds": game.get("paused_seconds", 0) + paused_secs
+                    }).eq("id", game["id"]).execute()
+                    st.rerun()
 
             st.markdown("</div>", unsafe_allow_html=True)
