@@ -1,256 +1,206 @@
 import streamlit as st
-from supabase_client import supabase
-from datetime import datetime
-import pytz
-import time
-import math
+from datetime import datetime, timezone
+from dateutil import parser as date_parser
+from db.game import add_game, get_active_games, end_game, update_game
+from db.table import get_tables
+from db.customer import get_customers, add_customer
 
-IST = pytz.timezone("Asia/Kolkata")
-time.sleep(0.2)
+st.set_page_config(page_title="Reception - POS", layout="wide")
 
-# --------------------------------------------------
-# 🧠 TIME HELPERS (ROBUST – FIXED)
-# --------------------------------------------------
+
 def parse_utc(dt):
+    """Parse datetime from various formats"""
+    if isinstance(dt, datetime):
+        return dt
     if dt is None:
         return None
+    try:
+        return date_parser.parse(str(dt))
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Invalid datetime format: {dt} (type: {type(dt)}). Error: {e}")
 
-    if isinstance(dt, datetime):
-        return dt.replace(tzinfo=None)
 
-    if isinstance(dt, str):
-        try:
-            return datetime.fromisoformat(
-                dt.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-        except Exception:
-            raise ValueError(f"Invalid datetime format: {dt}")
-
-    raise ValueError(f"Invalid datetime type: {type(dt)}")
+def format_duration(minutes):
+    """Format minutes into hours and minutes"""
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    mins = minutes % 60
+    if mins == 0:
+        return f"{hours}h"
+    return f"{hours}h {mins}m"
 
 
 def calculate_game_amount(game):
-    """
-    Pool billing with:
-    - Pause support
-    - 15-minute slab rounding (UP)
-    """
+    """Calculate game amount based on elapsed time"""
     start = parse_utc(game["start_time"])
-    now = datetime.utcnow().replace(tzinfo=None)
-
-    if game["status"] == "paused" and game.get("paused_at"):
-        now = parse_utc(game["paused_at"])
-
-    elapsed_seconds = max(0, int((now - start).total_seconds()))
-    elapsed_minutes = elapsed_seconds / 60
-
-    # ---- 15 MIN ROUNDING ----
-    billed_minutes = math.ceil(elapsed_minutes / 15) * 15 if elapsed_minutes > 0 else 0
-
-    rate_30 = float(game["rate_per_30_min"])
-    rate_per_hour = rate_30 * 2
-    rate_per_15 = rate_per_hour / 4
-
-    amount = round((billed_minutes / 15) * rate_per_15, 2)
-
-    return elapsed_minutes, billed_minutes, rate_per_hour, amount
+    now = datetime.now(timezone.utc)
+    elapsed = now - start
+    elapsed_min = int(elapsed.total_seconds() / 60)
+    
+    rate_hr = game.get("rate_per_hour", 0)
+    
+    # Calculate billed minutes (round up to nearest 15 min)
+    billed_min = ((elapsed_min + 14) // 15) * 15
+    
+    # Calculate amount
+    game_amount = (billed_min / 60) * rate_hr
+    
+    return elapsed_min, billed_min, rate_hr, game_amount
 
 
-# --------------------------------------------------
-# 🧾 RECEPTION SCREEN
-# --------------------------------------------------
 def reception_screen(tenant_id):
-    st.title("🧾 Reception / Cashier")
-
-    st.markdown("""
-    <style>
-    .order-box {
-        background-color: var(--secondary-background-color);
-        border: 1px solid rgba(128,128,128,0.4);
-        border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 16px;
-    }
-    button { min-height: 46px; font-size: 15px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    if st.button("🔄 Refresh"):
-        st.rerun()
-
-    # --------------------------------------------------
-    # ➕ CREATE NEW ORDER
-    # --------------------------------------------------
-    st.divider()
-    st.subheader("➕ Create New Order")
-
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        new_table = st.text_input(
-            "🍽 Table / Customer Name",
-            placeholder="Table 5 / Walk-in / Rahul",
-            key="new_table"
-        )
-
-    with c2:
-        if st.button("➕ Create Order", use_container_width=True):
-            supabase.table("orders").insert({
-                "tenant_id": tenant_id,
-                "table_name": new_table,
-                "status": "open",
-                "created_at": datetime.utcnow().isoformat()
-            }).execute()
-            st.success("Order created")
-            st.rerun()
-
-    # --------------------------------------------------
-    # 📅 TODAY ORDERS
-    # --------------------------------------------------
-    today_ist = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
-    today_utc = today_ist.astimezone(pytz.utc)
-
-    orders = supabase.table("orders") \
-        .select("*, order_items(*)") \
-        .eq("tenant_id", tenant_id) \
-        .gte("created_at", today_utc.isoformat()) \
-        .order("created_at", desc=True) \
-        .execute()
-
-    products = supabase.table("products") \
-        .select("name, price") \
-        .eq("tenant_id", tenant_id) \
-        .eq("available", True) \
-        .execute()
-
-    product_map = {p["name"]: float(p["price"]) for p in products.data}
-
-    if not orders.data:
-        st.info("No orders today")
-        return
-
-    # --------------------------------------------------
-    # 🧾 ORDER LOOP
-    # --------------------------------------------------
-    for order in orders.data:
-        order_id = order["id"]
-        is_open = order["status"] == "open"
-
-        with st.expander(f"🧾 Order – {order.get('table_name') or order_id}"):
-            st.markdown("<div class='order-box'>", unsafe_allow_html=True)
-
-            # ---------------- FOOD ----------------
-            st.subheader("🍔 Food Items")
-            food_total = 0.0
-
-            for item in order.get("order_items", []):
-                cols = st.columns([4, 1, 1])
-                cols[0].write(f"{item['product_name']} × {item['quantity']}")
-                cols[1].write(f"₹{item['price']:.2f}")
-                food_total += float(item["price"])
-
-                if is_open and cols[2].button("❌", key=f"del_{item['id']}"):
-                    supabase.table("order_items").delete().eq("id", item["id"]).execute()
-                    st.rerun()
-
-            if is_open and product_map:
-                st.divider()
-                a, b, c = st.columns([3, 1, 1])
-                prod = a.selectbox("Add Item", list(product_map.keys()), key=f"p_{order_id}")
-                qty = b.number_input("Qty", 1, step=1, key=f"q_{order_id}")
-                if c.button("Add", key=f"add_{order_id}"):
-                    supabase.table("order_items").insert({
-                        "order_id": order_id,
-                        "product_name": prod,
-                        "quantity": qty,
-                        "price": qty * product_map[prod]
-                    }).execute()
-                    st.rerun()
-
-            # ---------------- POOL GAME ----------------
-            st.divider()
-            st.subheader("🎱 Pool Game")
-
-            game_res = supabase.table("games") \
-                .select("*") \
-                .eq("order_id", order_id) \
-                .order("created_at", desc=True) \
-                .limit(1) \
-                .execute()
-
-            game = game_res.data[0] if game_res.data else None
-            game_amount = 0.0
-            pool_started = bool(game)
-
-            if game:
-                elapsed_min, billed_min, rate_hr, game_amount = calculate_game_amount(game)
-
-                st.write(f"💲 Rate: ₹{rate_hr} / hour")
-                st.write(f"⏱ Actual Time: {int(elapsed_min)} min")
-                st.write(f"🧮 Billed Time (15m slabs): {billed_min} min")
-                st.write(f"💰 Game Total: ₹{game_amount:.2f}")
-
-                if is_open:
-                    if game["status"] == "running":
-                        if st.button("⏸ Pause Pool", key=f"pause_{game['id']}"):
-                            supabase.table("games").update({
-                                "status": "paused",
-                                "paused_at": datetime.utcnow().isoformat()
-                            }).eq("id", game["id"]).execute()
+    st.title("🎮 Reception - Game Management")
+    
+    # Sidebar for starting new games
+    with st.sidebar:
+        st.header("Start New Game")
+        
+        # Get available tables
+        tables = get_tables(tenant_id)
+        available_tables = [t for t in tables if t.get("status") == "available"]
+        
+        if not available_tables:
+            st.warning("No tables available")
+        else:
+            table_options = {f"Table {t['table_number']}": t["id"] for t in available_tables}
+            selected_table = st.selectbox("Select Table", options=list(table_options.keys()))
+            
+            # Customer selection
+            customers = get_customers(tenant_id)
+            customer_options = ["Walk-in"] + [f"{c['name']} - {c['phone']}" for c in customers]
+            selected_customer = st.selectbox("Customer", customer_options)
+            
+            # Add new customer option
+            if st.checkbox("Add New Customer"):
+                with st.form("new_customer_form"):
+                    new_name = st.text_input("Customer Name")
+                    new_phone = st.text_input("Phone Number")
+                    new_email = st.text_input("Email (optional)")
+                    
+                    if st.form_submit_button("Add Customer"):
+                        if new_name and new_phone:
+                            add_customer(tenant_id, new_name, new_phone, new_email if new_email else None)
+                            st.success(f"Customer {new_name} added!")
                             st.rerun()
-
-                    elif game["status"] == "paused":
-                        if st.button("▶ Resume Pool", key=f"resume_{game['id']}"):
-                            supabase.table("games").update({
-                                "status": "running",
-                                "paused_at": None
-                            }).eq("id", game["id"]).execute()
-                            st.rerun()
-
-            if not game and is_open:
-                rate_hr = st.number_input(
-                    "Pool Price (₹ / Hour)",
-                    min_value=0,
-                    step=50,
-                    value=200,
-                    key=f"rate_{order_id}"
+                        else:
+                            st.error("Name and phone are required")
+            
+            # Game type and rate
+            game_type = st.selectbox("Game Type", ["Pool", "Snooker", "Carrom", "Other"])
+            rate = st.number_input("Rate per Hour (₹)", min_value=0, value=100, step=10)
+            
+            # Notes
+            notes = st.text_area("Notes (optional)")
+            
+            if st.button("🎯 Start Game", type="primary", use_container_width=True):
+                table_id = table_options[selected_table]
+                
+                # Get customer ID if not walk-in
+                customer_id = None
+                if selected_customer != "Walk-in":
+                    customer_phone = selected_customer.split(" - ")[1]
+                    customer = next((c for c in customers if c["phone"] == customer_phone), None)
+                    if customer:
+                        customer_id = customer["id"]
+                
+                # Start the game
+                game_id = add_game(
+                    tenant_id=tenant_id,
+                    table_id=table_id,
+                    customer_id=customer_id,
+                    game_type=game_type,
+                    rate_per_hour=rate,
+                    notes=notes
                 )
-                if st.button("🎱 Start Pool", key=f"start_{order_id}"):
-                    supabase.table("games").insert({
-                        "tenant_id": tenant_id,
-                        "order_id": order_id,
-                        "game_type": "pool",
-                        "rate_per_30_min": rate_hr / 2,
-                        "start_time": datetime.utcnow().isoformat(),
-                        "status": "running"
-                    }).execute()
+                
+                if game_id:
+                    st.success(f"Game started on {selected_table}!")
                     st.rerun()
+                else:
+                    st.error("Failed to start game")
+    
+    # Main area - Active games
+    st.header("🎲 Active Games")
+    
+    active_games = get_active_games(tenant_id)
+    
+    if not active_games:
+        st.info("No active games at the moment")
+    else:
+        # Create columns for game cards
+        cols_per_row = 3
+        for idx in range(0, len(active_games), cols_per_row):
+            cols = st.columns(cols_per_row)
+            
+            for col_idx, game in enumerate(active_games[idx:idx + cols_per_row]):
+                with cols[col_idx]:
+                    # Calculate current amount
+                    elapsed_min, billed_min, rate_hr, game_amount = calculate_game_amount(game)
+                    
+                    # Create card
+                    with st.container(border=True):
+                        # Header
+                        st.subheader(f"🎱 Table {game['table_number']}")
+                        
+                        # Game info
+                        st.write(f"**Type:** {game['game_type']}")
+                        st.write(f"**Customer:** {game.get('customer_name', 'Walk-in')}")
+                        
+                        # Time info
+                        start_time = parse_utc(game["start_time"])
+                        st.write(f"**Started:** {start_time.strftime('%I:%M %p')}")
+                        st.write(f"**Duration:** {format_duration(elapsed_min)}")
+                        st.write(f"**Billed:** {format_duration(billed_min)}")
+                        
+                        # Amount
+                        st.metric("Current Amount", f"₹{game_amount:.2f}")
+                        
+                        # Notes if any
+                        if game.get('notes'):
+                            with st.expander("📝 Notes"):
+                                st.write(game['notes'])
+                        
+                        # Action buttons
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("⏸️ Pause", key=f"pause_{game['id']}", use_container_width=True):
+                                # Toggle pause status
+                                new_status = "paused" if game.get("status") == "active" else "active"
+                                update_game(game["id"], {"status": new_status})
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("🛑 End", key=f"end_{game['id']}", type="primary", use_container_width=True):
+                                # End the game
+                                end_game(game["id"], game_amount)
+                                st.success(f"Game ended! Amount: ₹{game_amount:.2f}")
+                                st.rerun()
+                        
+                        # Show pause indicator
+                        if game.get("status") == "paused":
+                            st.warning("⏸️ Game Paused")
+    
+    # Quick stats
+    st.divider()
+    st.subheader("📊 Quick Stats")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Active Games", len(active_games))
+    
+    with col2:
+        total_tables = len(tables)
+        occupied = len([t for t in tables if t.get("status") == "occupied"])
+        st.metric("Tables Occupied", f"{occupied}/{total_tables}")
+    
+    with col3:
+        total_revenue = sum(calculate_game_amount(g)[3] for g in active_games)
+        st.metric("Current Revenue", f"₹{total_revenue:.2f}")
 
-            # ---------------- FINAL BILL ----------------
-            st.divider()
-            st.subheader("🧾 Final Bill")
 
-            grand_total = round(food_total + game_amount, 2)
-
-            st.write(f"🍔 Food Total: ₹{food_total:.2f}")
-            st.write(f"🎱 Pool Total: ₹{game_amount:.2f}")
-            st.write(f"💰 **Grand Total: ₹{grand_total:.2f}**")
-
-            if is_open and st.button("💳 Mark as Paid & Close Order", key=f"pay_{order_id}", type="primary"):
-                if game:
-                    supabase.table("games").update({"status": "billed"}).eq("id", game["id"]).execute()
-                supabase.table("orders").update({"status": "completed"}).eq("id", order_id).execute()
-                st.success("Order closed")
-                st.rerun()
-
-            # ---------------- DELETE ORDER ----------------
-            if is_open and not pool_started:
-                if st.button("🗑 Delete Order", key=f"delete_{order_id}"):
-                    supabase.table("order_items").delete().eq("order_id", order_id).execute()
-                    supabase.table("games").delete().eq("order_id", order_id).execute()
-                    supabase.table("orders").delete().eq("id", order_id).execute()
-                    st.success("Order deleted")
-                    st.rerun()
-            elif pool_started:
-                st.info("🔒 Order delete disabled (pool started)")
-
-            st.markdown("</div>", unsafe_allow_html=True)
+if __name__ == "__main__":
+    # For testing
+    reception_screen("test_tenant")
