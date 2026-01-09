@@ -169,7 +169,7 @@ def reception_screen(tenant_id):
                     supabase.table("games").insert({
                         "tenant_id": tenant_id,
                         "order_id": order_id,
-                        "rate_per_hour": rate,
+                        "rate_per_30_min": rate / 2,  # convert hour → 30 min
                         "start_time": datetime.utcnow().isoformat(),
                         "paused_seconds": 0,
                         "status": "running"
