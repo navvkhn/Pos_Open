@@ -9,17 +9,31 @@ IST = pytz.timezone("Asia/Kolkata")
 time.sleep(0.2)
 
 # --------------------------------------------------
-# 🧠 TIME HELPERS
+# 🧠 TIME HELPERS (ROBUST – FIXED)
 # --------------------------------------------------
 def parse_utc(dt):
+    if dt is None:
+        return None
+
+    if isinstance(dt, datetime):
+        return dt.replace(tzinfo=None)
+
     if isinstance(dt, str):
-        return datetime.fromisoformat(dt.replace("Z", "")).replace(tzinfo=None)
-    return dt.replace(tzinfo=None)
+        try:
+            return datetime.fromisoformat(
+                dt.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+        except Exception:
+            raise ValueError(f"Invalid datetime format: {dt}")
+
+    raise ValueError(f"Invalid datetime type: {type(dt)}")
 
 
 def calculate_game_amount(game):
     """
-    Auto-rounding: 15-minute slabs
+    Pool billing with:
+    - Pause support
+    - 15-minute slab rounding (UP)
     """
     start = parse_utc(game["start_time"])
     now = datetime.utcnow().replace(tzinfo=None)
@@ -31,15 +45,15 @@ def calculate_game_amount(game):
     elapsed_minutes = elapsed_seconds / 60
 
     # ---- 15 MIN ROUNDING ----
-    slab_minutes = math.ceil(elapsed_minutes / 15) * 15 if elapsed_minutes > 0 else 0
+    billed_minutes = math.ceil(elapsed_minutes / 15) * 15 if elapsed_minutes > 0 else 0
 
     rate_30 = float(game["rate_per_30_min"])
     rate_per_hour = rate_30 * 2
     rate_per_15 = rate_per_hour / 4
 
-    amount = round((slab_minutes / 15) * rate_per_15, 2)
+    amount = round((billed_minutes / 15) * rate_per_15, 2)
 
-    return elapsed_minutes, slab_minutes, rate_per_hour, amount
+    return elapsed_minutes, billed_minutes, rate_per_hour, amount
 
 
 # --------------------------------------------------
@@ -77,6 +91,7 @@ def reception_screen(tenant_id):
             placeholder="Table 5 / Walk-in / Rahul",
             key="new_table"
         )
+
     with c2:
         if st.button("➕ Create Order", use_container_width=True):
             supabase.table("orders").insert({
@@ -139,10 +154,10 @@ def reception_screen(tenant_id):
 
             if is_open and product_map:
                 st.divider()
-                p1, p2, p3 = st.columns([3, 1, 1])
-                prod = p1.selectbox("Add Item", list(product_map.keys()), key=f"p_{order_id}")
-                qty = p2.number_input("Qty", 1, step=1, key=f"q_{order_id}")
-                if p3.button("Add", key=f"add_{order_id}"):
+                a, b, c = st.columns([3, 1, 1])
+                prod = a.selectbox("Add Item", list(product_map.keys()), key=f"p_{order_id}")
+                qty = b.number_input("Qty", 1, step=1, key=f"q_{order_id}")
+                if c.button("Add", key=f"add_{order_id}"):
                     supabase.table("order_items").insert({
                         "order_id": order_id,
                         "product_name": prod,
@@ -151,7 +166,7 @@ def reception_screen(tenant_id):
                     }).execute()
                     st.rerun()
 
-            # ---------------- GAME ----------------
+            # ---------------- POOL GAME ----------------
             st.divider()
             st.subheader("🎱 Pool Game")
 
@@ -167,12 +182,12 @@ def reception_screen(tenant_id):
             pool_started = bool(game)
 
             if game:
-                elapsed_min, slab_min, rate_hr, game_amount = calculate_game_amount(game)
+                elapsed_min, billed_min, rate_hr, game_amount = calculate_game_amount(game)
 
                 st.write(f"💲 Rate: ₹{rate_hr} / hour")
                 st.write(f"⏱ Actual Time: {int(elapsed_min)} min")
-                st.write(f"🧮 Billed Time (15m slabs): {slab_min} min")
-                st.write(f"💰 Game Total: ₹{game_amount}")
+                st.write(f"🧮 Billed Time (15m slabs): {billed_min} min")
+                st.write(f"💰 Game Total: ₹{game_amount:.2f}")
 
                 if is_open:
                     if game["status"] == "running":
