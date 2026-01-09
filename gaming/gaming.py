@@ -6,33 +6,29 @@ import time
 
 IST = pytz.timezone("Asia/Kolkata")
 
-st.set_page_config(
-    page_title="Pool Table Live",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
+st.set_page_config(layout="centered")
 st.title("🎱 Pool Table Live")
 
 # --------------------------------------------------
-# 🧠 SAFE TIME PARSER
+# 🧠 TIME HELPERS (SAFE)
 # --------------------------------------------------
 def parse_utc(dt):
     if isinstance(dt, str):
-        return datetime.fromisoformat(dt.replace("Z", ""))
-    return dt
+        return datetime.fromisoformat(dt.replace("Z", "")).replace(tzinfo=None)
+    if isinstance(dt, datetime):
+        return dt.replace(tzinfo=None)
+    return None
 
 
 # --------------------------------------------------
-# 🔁 AUTO REFRESH EVERY 2 MINUTES
+# 🔁 HARD AUTO REFRESH (EVERY 2 MINUTES)
 # --------------------------------------------------
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = datetime.utcnow()
+if "last_hard_refresh" not in st.session_state:
+    st.session_state.last_hard_refresh = datetime.utcnow()
 
-if datetime.utcnow() - st.session_state.last_refresh >= timedelta(minutes=2):
-    st.session_state.last_refresh = datetime.utcnow()
+if datetime.utcnow() - st.session_state.last_hard_refresh > timedelta(minutes=2):
+    st.session_state.last_hard_refresh = datetime.utcnow()
     st.rerun()
-
 
 # --------------------------------------------------
 # 🎱 FETCH RUNNING GAME (SAFE)
@@ -44,51 +40,52 @@ try:
         .order("created_at", desc=True) \
         .limit(1) \
         .execute()
-except Exception as e:
-    st.error("Unable to connect to game service")
-    time.sleep(10)
+except Exception:
+    st.error("Unable to load gaming screen")
+    time.sleep(2)
     st.rerun()
 
 if not game_res.data:
     st.info("No active pool game")
-    time.sleep(10)
+    time.sleep(2)
     st.rerun()
 
 game = game_res.data[0]
 
-
 # --------------------------------------------------
-# 👤 FETCH CUSTOMER NAME (SAFE – NO .single())
+# 🧾 FETCH ORDER (CUSTOMER NAME)
 # --------------------------------------------------
-customer_name = "—"
+order_name = "—"
 
 try:
     order_res = supabase.table("orders") \
         .select("table_name") \
         .eq("id", game["order_id"]) \
-        .limit(1) \
+        .single() \
         .execute()
 
-    if order_res.data:
-        customer_name = order_res.data[0].get("table_name") or "—"
+    order_name = order_res.data.get("table_name") or "—"
 except Exception:
-    # Do NOT crash gaming screen if order is missing
-    customer_name = "—"
-
+    pass
 
 # --------------------------------------------------
-# ⏱ TIME CALCULATION (STATIC PER REFRESH)
+# ⏱ TIME CALCULATION (CONTINUOUS)
 # --------------------------------------------------
 start_time = parse_utc(game.get("start_time"))
-now = datetime.utcnow()
+now = datetime.utcnow().replace(tzinfo=None)
+
+if not start_time:
+    st.error("Invalid game start time")
+    time.sleep(2)
+    st.rerun()
 
 elapsed_seconds = max(0, int((now - start_time).total_seconds()))
 
 hours = elapsed_seconds // 3600
 minutes = (elapsed_seconds % 3600) // 60
+seconds = elapsed_seconds % 60
 
-elapsed_str = f"{hours:02d}:{minutes:02d}"
-
+elapsed_str = f"{hours:02d} Hours {minutes:02d} Minutes {seconds:02d} Seconds"
 
 # --------------------------------------------------
 # 💰 AMOUNT CALCULATION
@@ -98,25 +95,23 @@ rate_per_hour = rate_30 * 2
 
 amount = round((elapsed_seconds / 3600) * rate_per_hour, 2)
 
+# --------------------------------------------------
+# 📺 DISPLAY
+# --------------------------------------------------
+st.subheader(f"👤 {order_name}")
+
+st.metric("🎱 Pool Price", f"₹ {rate_per_hour} / Hour")
+st.metric(
+    "🕒 Started At",
+    start_time.astimezone(IST).strftime("%I:%M:%S %p")
+)
+st.metric("⏱ Time Elapsed", elapsed_str)
+st.metric("💰 Total Spend", f"₹ {amount}")
+
+st.caption("Auto-updating live")
 
 # --------------------------------------------------
-# 📺 DISPLAY (PURE STREAMLIT, CENTERED)
+# ⏲ SOFT REFRESH (EVERY SECOND – CLOCK ONLY)
 # --------------------------------------------------
-left, center, right = st.columns([1, 2, 1])
-
-with center:
-    st.subheader(f"👤 {customer_name}")
-
-    st.write("🎱 **Price / Hour**")
-    st.write(f"₹ {rate_per_hour}")
-
-    st.write("🕒 **Started At**")
-    st.write(start_time.astimezone(IST).strftime("%I:%M %p"))
-
-    st.write("⏱ **Time Elapsed**")
-    st.write(elapsed_str)
-
-    st.write("💰 **Total Spend**")
-    st.write(f"₹ {amount}")
-
-st.caption("Auto-refresh every 2 minutes")
+time.sleep(1)
+st.rerun()
