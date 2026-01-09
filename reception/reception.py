@@ -16,13 +16,12 @@ def calculate_game_amount(game):
         # Parse start_time - handle various formats
         start_str = game["start_time"]
         if isinstance(start_str, str):
-            # Remove 'Z' and any timezone info, then parse
-            start_str = start_str.replace("Z", "+00:00")
-            try:
-                start = datetime.fromisoformat(start_str)
-            except ValueError:
-                # Fallback: try without timezone
-                start = datetime.fromisoformat(start_str.split("+")[0].split("-")[0])
+            # Remove 'Z' suffix and parse
+            start_str = start_str.replace("Z", "")
+            if "+" in start_str:
+                # Has timezone offset like +00:00
+                start_str = start_str.split("+")[0]
+            start = datetime.fromisoformat(start_str)
         else:
             start = start_str
         
@@ -36,14 +35,13 @@ def calculate_game_amount(game):
         paused_seconds = game.get("paused_seconds", 0)
         
         # If game is paused, use paused_at time
-        if game["status"] == "paused" and game.get("paused_at"):
+        if game.get("status") == "paused" and game.get("paused_at"):
             paused_str = game["paused_at"]
             if isinstance(paused_str, str):
-                paused_str = paused_str.replace("Z", "+00:00")
-                try:
-                    end = datetime.fromisoformat(paused_str)
-                except ValueError:
-                    end = datetime.fromisoformat(paused_str.split("+")[0].split("-")[0])
+                paused_str = paused_str.replace("Z", "")
+                if "+" in paused_str:
+                    paused_str = paused_str.split("+")[0]
+                end = datetime.fromisoformat(paused_str)
             else:
                 end = paused_str
             
@@ -57,13 +55,15 @@ def calculate_game_amount(game):
         minutes = (elapsed_seconds % 3600) // 60
         seconds = elapsed_seconds % 60
         
-        rate = float(game["rate_per_hour"])
+        rate = float(game.get("rate_per_hour", 0))
         amount = round((elapsed_seconds / 3600) * rate, 2)
         
         return elapsed_seconds, hours, minutes, seconds, amount
     
     except Exception as e:
         st.error(f"Error calculating game amount: {str(e)}")
+        # Also print to help debug
+        st.error(f"Game data: start_time={game.get('start_time')}, status={game.get('status')}")
         return 0, 0, 0, 0, 0.0
 
 
@@ -224,7 +224,8 @@ def reception_screen(tenant_id):
                 with col2:
                     st.metric("💰 Game Amount", f"₹{game_amount}")
                 
-                st.write(f"💲 Rate: ₹{game['rate_per_hour']} / hour")
+                rate_per_hour = game.get('rate_per_hour', 0)
+                st.write(f"💲 Rate: ₹{rate_per_hour} / hour")
                 
                 # Game control buttons
                 if game["status"] == "running":
@@ -238,16 +239,26 @@ def reception_screen(tenant_id):
                 elif game["status"] == "paused":
                     if st.button("▶️ Resume Game", key=f"resume_{order_id}"):
                         # Calculate paused duration and add to total
-                        paused_at = datetime.fromisoformat(game["paused_at"].replace("Z", "+00:00"))
-                        now = datetime.now(pytz.UTC)
-                        pause_duration = int((now - paused_at).total_seconds())
-                        
-                        supabase.table("games").update({
-                            "status": "running",
-                            "paused_at": None,
-                            "paused_seconds": game.get("paused_seconds", 0) + pause_duration
-                        }).eq("id", game["id"]).execute()
-                        st.rerun()
+                        paused_at_str = game.get("paused_at", "")
+                        if paused_at_str:
+                            paused_at_str = paused_at_str.replace("Z", "")
+                            if "+" in paused_at_str:
+                                paused_at_str = paused_at_str.split("+")[0]
+                            paused_at = datetime.fromisoformat(paused_at_str)
+                            if paused_at.tzinfo is None:
+                                paused_at = paused_at.replace(tzinfo=pytz.UTC)
+                            
+                            now = datetime.now(pytz.UTC)
+                            pause_duration = int((now - paused_at).total_seconds())
+                            
+                            supabase.table("games").update({
+                                "status": "running",
+                                "paused_at": None,
+                                "paused_seconds": game.get("paused_seconds", 0) + pause_duration
+                            }).eq("id", game["id"]).execute()
+                            st.rerun()
+                        else:
+                            st.error("Cannot resume: paused_at timestamp missing")
 
             # ---------------- TOTALS ----------------
             st.divider()
