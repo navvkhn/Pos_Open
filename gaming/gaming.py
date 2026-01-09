@@ -85,7 +85,7 @@ hours = elapsed_seconds // 3600
 minutes = (elapsed_seconds % 3600) // 60
 seconds = elapsed_seconds % 60
 
-elapsed_str = f"{hours:02d} Hours {minutes:02d} Minutes {seconds:02d} Seconds"
+elapsed_str = f"{hours:02d} hrs {minutes:02d} Mins {seconds:02d} Sec"
 
 # --------------------------------------------------
 # 💰 AMOUNT CALCULATION
