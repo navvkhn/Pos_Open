@@ -184,7 +184,8 @@ def reception_screen(tenant_id):
                 "Discount %",
                 0.0, 100.0,
                 value=float(order.get("discount_percent") or 0),
-                disabled=not is_open
+                disabled=not is_open,
+                key=f"discount_{order_id}"
             )
 
             discount_amount = round(subtotal * discount_percent / 100, 2)
