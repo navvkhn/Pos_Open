@@ -31,15 +31,15 @@ def reports(tenant_id):
     end_utc = end_ist.astimezone(pytz.utc).isoformat()
 
     # --------------------------------------------------
-    # 🧾 FETCH ORDERS (TENANT LOCKED)
+    # 🧾 FETCH ORDERS (TENANT SAFE)
     # --------------------------------------------------
     orders = supabase.table("orders") \
         .select("""
             id,
-            tenant_id,
+            customer_id,
+            customer_name,
             total,
             discount_amount,
-            discount_percent,
             created_at
         """) \
         .eq("tenant_id", tenant_id) \
@@ -78,19 +78,64 @@ def reports(tenant_id):
     st.divider()
 
     # --------------------------------------------------
-    # 🟢 DISCOUNTED vs NON-DISCOUNTED ORDERS
+    # 🧑‍🤝‍🧑 MOST VISITED CUSTOMERS ⭐ NEW
     # --------------------------------------------------
-    discount_orders = orders_df[orders_df["discount_amount"] > 0]
-    no_discount_orders = orders_df[orders_df["discount_amount"] == 0]
+    st.subheader("🧑‍🤝‍🧑 Most Visited Customers")
 
-    c1, c2 = st.columns(2)
-    c1.metric("🟢 Orders with Discount", len(discount_orders))
-    c2.metric("⚪ Orders without Discount", len(no_discount_orders))
+    customers = supabase.table("customers") \
+        .select("id, name, mobile") \
+        .eq("tenant_id", tenant_id) \
+        .execute()
+
+    customers_df = pd.DataFrame(customers.data)
+
+    if not customers_df.empty:
+        customer_summary = (
+            orders_df
+            .groupby(["customer_id", "customer_name"])
+            .agg(
+                visits=("id", "count"),
+                total_spent=("total", "sum"),
+                avg_bill=("total", "mean")
+            )
+            .reset_index()
+            .sort_values(by="visits", ascending=False)
+        )
+
+        customer_summary = customer_summary.merge(
+            customers_df,
+            left_on="customer_id",
+            right_on="id",
+            how="left"
+        )
+
+        customer_summary = customer_summary[[
+            "name",
+            "mobile",
+            "visits",
+            "total_spent",
+            "avg_bill"
+        ]]
+
+        customer_summary.columns = [
+            "Customer Name",
+            "Mobile",
+            "Visits",
+            "Total Spent (₹)",
+            "Avg Bill (₹)"
+        ]
+
+        st.dataframe(
+            customer_summary.head(10),
+            use_container_width=True
+        )
+    else:
+        st.info("No customer data available")
 
     st.divider()
 
     # --------------------------------------------------
-    # 🍽 FETCH ORDER ITEMS (TENANT SAFE JOIN)
+    # 🍽 PRODUCT INSIGHTS
     # --------------------------------------------------
     order_ids = orders_df["id"].tolist()
 
@@ -107,15 +152,8 @@ def reports(tenant_id):
         .eq("orders.tenant_id", tenant_id) \
         .execute()
 
-    if not items.data:
-        st.info("No item data available")
-        return
-
     items_df = pd.DataFrame(items.data)
 
-    # --------------------------------------------------
-    # 🏆 PRODUCT INSIGHTS
-    # --------------------------------------------------
     product_summary = (
         items_df
         .groupby("product_name")
@@ -129,6 +167,7 @@ def reports(tenant_id):
 
     st.subheader("🏆 Top Products")
     st.dataframe(product_summary.head(10), use_container_width=True)
+
     st.divider()
 
     # --------------------------------------------------
@@ -156,7 +195,7 @@ def reports(tenant_id):
     st.divider()
 
     # --------------------------------------------------
-    # 📥 CSV EXPORT
+    # 📥 EXPORTS
     # --------------------------------------------------
     st.subheader("📥 Export Data")
 
