@@ -11,24 +11,60 @@ time.sleep(0.2)
 # 🧠 HELPERS
 # --------------------------------------------------
 def calculate_game_amount(game):
-    start = datetime.fromisoformat(game["start_time"].replace("Z", ""))
-    end = datetime.utcnow()
-
-    paused_seconds = game.get("paused_seconds", 0)
-
-    if game["status"] == "paused" and game.get("paused_at"):
-        end = datetime.fromisoformat(game["paused_at"].replace("Z", ""))
-
-    elapsed_seconds = max(0, int((end - start).total_seconds() - paused_seconds))
-
-    hours = elapsed_seconds // 3600
-    minutes = (elapsed_seconds % 3600) // 60
-    seconds = elapsed_seconds % 60
-
-    rate = float(game["rate_per_hour"])
-    amount = round((elapsed_seconds / 3600) * rate, 2)
-
-    return elapsed_seconds, hours, minutes, seconds, amount
+    """Calculate game amount with proper datetime parsing"""
+    try:
+        # Parse start_time - handle various formats
+        start_str = game["start_time"]
+        if isinstance(start_str, str):
+            # Remove 'Z' and any timezone info, then parse
+            start_str = start_str.replace("Z", "+00:00")
+            try:
+                start = datetime.fromisoformat(start_str)
+            except ValueError:
+                # Fallback: try without timezone
+                start = datetime.fromisoformat(start_str.split("+")[0].split("-")[0])
+        else:
+            start = start_str
+        
+        # Make sure start is timezone-aware (UTC)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=pytz.UTC)
+        
+        # Get end time
+        end = datetime.now(pytz.UTC)
+        
+        paused_seconds = game.get("paused_seconds", 0)
+        
+        # If game is paused, use paused_at time
+        if game["status"] == "paused" and game.get("paused_at"):
+            paused_str = game["paused_at"]
+            if isinstance(paused_str, str):
+                paused_str = paused_str.replace("Z", "+00:00")
+                try:
+                    end = datetime.fromisoformat(paused_str)
+                except ValueError:
+                    end = datetime.fromisoformat(paused_str.split("+")[0].split("-")[0])
+            else:
+                end = paused_str
+            
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=pytz.UTC)
+        
+        # Calculate elapsed time
+        elapsed_seconds = max(0, int((end - start).total_seconds() - paused_seconds))
+        
+        hours = elapsed_seconds // 3600
+        minutes = (elapsed_seconds % 3600) // 60
+        seconds = elapsed_seconds % 60
+        
+        rate = float(game["rate_per_hour"])
+        amount = round((elapsed_seconds / 3600) * rate, 2)
+        
+        return elapsed_seconds, hours, minutes, seconds, amount
+    
+    except Exception as e:
+        st.error(f"Error calculating game amount: {str(e)}")
+        return 0, 0, 0, 0, 0.0
 
 
 # --------------------------------------------------
@@ -63,22 +99,25 @@ def reception_screen(tenant_id):
 
     with c1:
         new_table = st.text_input(
-            "🍽 Table / Customer Name",
+            "🽠Table / Customer Name",
             placeholder="Table 5 / Walk-in / Rahul",
             key="new_table"
         )
 
     with c2:
         if st.button("➕ Create Order", use_container_width=True):
-            supabase.table("orders").insert({
-                "tenant_id": tenant_id,
-                "table_name": new_table,
-                "status": "open",
-                "created_at": datetime.utcnow().isoformat()
-            }).execute()
+            if new_table.strip():
+                supabase.table("orders").insert({
+                    "tenant_id": tenant_id,
+                    "table_name": new_table,
+                    "status": "open",
+                    "created_at": datetime.utcnow().isoformat()
+                }).execute()
 
-            st.success("Order created")
-            st.rerun()
+                st.success("Order created")
+                st.rerun()
+            else:
+                st.error("Please enter a table name")
 
     # --------------------------------------------------
     # 📅 TODAY ORDERS
@@ -112,7 +151,7 @@ def reception_screen(tenant_id):
         order_id = order["id"]
         is_open = order["status"] == "open"
 
-        with st.expander(f"🧾 Order – {order.get('table_name') or order_id}"):
+        with st.expander(f"🧾 Order — {order.get('table_name') or order_id}", expanded=is_open):
             st.markdown("<div class='order-box'>", unsafe_allow_html=True)
 
             # ---------------- FOOD ----------------
@@ -179,16 +218,92 @@ def reception_screen(tenant_id):
             if game:
                 elapsed, h, m, s, game_amount = calculate_game_amount(game)
 
-                st.write(f"⏱ {h:02d}h {m:02d}m {s:02d}s")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("⏱ Duration", f"{h:02d}h {m:02d}m {s:02d}s")
+                with col2:
+                    st.metric("💰 Game Amount", f"₹{game_amount}")
+                
                 st.write(f"💲 Rate: ₹{game['rate_per_hour']} / hour")
-                st.write(f"💰 Game Total: ₹{game_amount}")
+                
+                # Game control buttons
+                if game["status"] == "running":
+                    if st.button("⏸️ Pause Game", key=f"pause_{order_id}"):
+                        supabase.table("games").update({
+                            "status": "paused",
+                            "paused_at": datetime.utcnow().isoformat()
+                        }).eq("id", game["id"]).execute()
+                        st.rerun()
+                
+                elif game["status"] == "paused":
+                    if st.button("▶️ Resume Game", key=f"resume_{order_id}"):
+                        # Calculate paused duration and add to total
+                        paused_at = datetime.fromisoformat(game["paused_at"].replace("Z", "+00:00"))
+                        now = datetime.now(pytz.UTC)
+                        pause_duration = int((now - paused_at).total_seconds())
+                        
+                        supabase.table("games").update({
+                            "status": "running",
+                            "paused_at": None,
+                            "paused_seconds": game.get("paused_seconds", 0) + pause_duration
+                        }).eq("id", game["id"]).execute()
+                        st.rerun()
 
-            # ---------------- DELETE ORDER ----------------
-            if is_open and st.button("🗑 Delete Order", key=f"delete_{order_id}"):
-                supabase.table("order_items").delete().eq("order_id", order_id).execute()
-                supabase.table("games").delete().eq("order_id", order_id).execute()
-                supabase.table("orders").delete().eq("id", order_id).execute()
-                st.success("Order deleted")
-                st.rerun()
+            # ---------------- TOTALS ----------------
+            st.divider()
+            
+            game_total = 0.0
+            if game:
+                _, _, _, _, game_total = calculate_game_amount(game)
+            
+            grand_total = food_total + game_total
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("🍔 Food Total", f"₹{food_total:.2f}")
+            with col2:
+                st.metric("🎱 Game Total", f"₹{game_total:.2f}")
+            with col3:
+                st.metric("💵 Grand Total", f"₹{grand_total:.2f}")
+
+            # ---------------- ACTIONS ----------------
+            st.divider()
+            
+            if is_open:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("✅ Complete Order", key=f"complete_{order_id}", type="primary", use_container_width=True):
+                        supabase.table("orders").update({
+                            "status": "completed",
+                            "completed_at": datetime.utcnow().isoformat(),
+                            "total_amount": grand_total
+                        }).eq("id", order_id).execute()
+                        
+                        # End any running games
+                        if game and game["status"] in ["running", "paused"]:
+                            supabase.table("games").update({
+                                "status": "completed",
+                                "end_time": datetime.utcnow().isoformat()
+                            }).eq("id", game["id"]).execute()
+                        
+                        st.success(f"Order completed! Total: ₹{grand_total:.2f}")
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🗑 Delete Order", key=f"delete_{order_id}", use_container_width=True):
+                        supabase.table("order_items").delete().eq("order_id", order_id).execute()
+                        supabase.table("games").delete().eq("order_id", order_id).execute()
+                        supabase.table("orders").delete().eq("id", order_id).execute()
+                        st.success("Order deleted")
+                        st.rerun()
+            
+            else:
+                st.success("✅ Order Completed")
 
             st.markdown("</div>", unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+    # For testing
+    reception_screen("test_tenant")
