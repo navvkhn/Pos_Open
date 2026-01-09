@@ -15,15 +15,16 @@ st.set_page_config(
 st.title("🎱 Pool Table Live")
 
 # --------------------------------------------------
-# 🧠 TIME PARSER (SAFE)
+# 🧠 SAFE TIME PARSER
 # --------------------------------------------------
 def parse_utc(dt):
     if isinstance(dt, str):
         return datetime.fromisoformat(dt.replace("Z", ""))
     return dt
 
+
 # --------------------------------------------------
-# 🔁 HARD REFRESH EVERY 2 MINUTES
+# 🔁 AUTO REFRESH EVERY 2 MINUTES
 # --------------------------------------------------
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = datetime.utcnow()
@@ -32,8 +33,9 @@ if datetime.utcnow() - st.session_state.last_refresh >= timedelta(minutes=2):
     st.session_state.last_refresh = datetime.utcnow()
     st.rerun()
 
+
 # --------------------------------------------------
-# 🎱 FETCH RUNNING GAME
+# 🎱 FETCH RUNNING GAME (SAFE)
 # --------------------------------------------------
 try:
     game_res = supabase.table("games") \
@@ -42,9 +44,9 @@ try:
         .order("created_at", desc=True) \
         .limit(1) \
         .execute()
-except Exception:
-    st.error("Unable to load gaming screen")
-    time.sleep(5)
+except Exception as e:
+    st.error("Unable to connect to game service")
+    time.sleep(10)
     st.rerun()
 
 if not game_res.data:
@@ -54,21 +56,30 @@ if not game_res.data:
 
 game = game_res.data[0]
 
-# --------------------------------------------------
-# 👤 FETCH CUSTOMER NAME
-# --------------------------------------------------
-order = supabase.table("orders") \
-    .select("table_name") \
-    .eq("id", game["order_id"]) \
-    .single() \
-    .execute()
 
-customer_name = order.data.get("table_name") or "—"
+# --------------------------------------------------
+# 👤 FETCH CUSTOMER NAME (SAFE – NO .single())
+# --------------------------------------------------
+customer_name = "—"
+
+try:
+    order_res = supabase.table("orders") \
+        .select("table_name") \
+        .eq("id", game["order_id"]) \
+        .limit(1) \
+        .execute()
+
+    if order_res.data:
+        customer_name = order_res.data[0].get("table_name") or "—"
+except Exception:
+    # Do NOT crash gaming screen if order is missing
+    customer_name = "—"
+
 
 # --------------------------------------------------
 # ⏱ TIME CALCULATION (STATIC PER REFRESH)
 # --------------------------------------------------
-start_time = parse_utc(game["start_time"])
+start_time = parse_utc(game.get("start_time"))
 now = datetime.utcnow()
 
 elapsed_seconds = max(0, int((now - start_time).total_seconds()))
@@ -78,6 +89,7 @@ minutes = (elapsed_seconds % 3600) // 60
 
 elapsed_str = f"{hours:02d}:{minutes:02d}"
 
+
 # --------------------------------------------------
 # 💰 AMOUNT CALCULATION
 # --------------------------------------------------
@@ -86,8 +98,9 @@ rate_per_hour = rate_30 * 2
 
 amount = round((elapsed_seconds / 3600) * rate_per_hour, 2)
 
+
 # --------------------------------------------------
-# 📺 CENTERED DISPLAY (PURE STREAMLIT)
+# 📺 DISPLAY (PURE STREAMLIT, CENTERED)
 # --------------------------------------------------
 left, center, right = st.columns([1, 2, 1])
 
