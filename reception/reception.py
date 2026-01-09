@@ -1,6 +1,17 @@
 import streamlit as st
 from datetime import datetime, timezone
-from dateutil import parser as date_parser
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from dateutil import parser as date_parser
+except ImportError:
+    # Fallback if dateutil is not available
+    date_parser = None
+
 from db.game import add_game, get_active_games, end_game, update_game
 from db.table import get_tables
 from db.customer import get_customers, add_customer
@@ -14,10 +25,44 @@ def parse_utc(dt):
         return dt
     if dt is None:
         return None
+    
+    # If dateutil is available, use it (most robust)
+    if date_parser:
+        try:
+            return date_parser.parse(str(dt))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid datetime format: {dt} (type: {type(dt)}). Error: {e}")
+    
+    # Fallback: manual parsing with multiple formats
+    dt_str = str(dt)
+    
+    # List of formats to try
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S.%fZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S%z",
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(dt_str, fmt)
+        except ValueError:
+            continue
+    
+    # Try to parse ISO format with timezone using fromisoformat
     try:
-        return date_parser.parse(str(dt))
-    except (ValueError, TypeError) as e:
-        raise ValueError(f"Invalid datetime format: {dt} (type: {type(dt)}). Error: {e}")
+        # Remove 'Z' if present and replace with +00:00
+        if dt_str.endswith('Z'):
+            dt_str = dt_str[:-1] + '+00:00'
+        return datetime.fromisoformat(dt_str)
+    except ValueError:
+        pass
+    
+    raise ValueError(f"Invalid datetime format: {dt} (type: {type(dt)})")
 
 
 def format_duration(minutes):
