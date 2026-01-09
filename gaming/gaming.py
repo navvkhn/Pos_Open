@@ -12,53 +12,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --------------------------------------------------
-# 🎨 SIMPLE CSS (CENTERED, STABLE)
-# --------------------------------------------------
-st.markdown("""
-<style>
-body {
-    text-align: center;
-}
-.card {
-    max-width: 420px;
-    margin: auto;
-    padding: 22px;
-    border-radius: 16px;
-    background-color: var(--secondary-background-color);
-    border: 1px solid rgba(255,255,255,0.15);
-}
-.title {
-    font-size: 26px;
-    font-weight: 700;
-    margin-bottom: 12px;
-}
-.label {
-    font-size: 14px;
-    opacity: 0.7;
-    margin-top: 14px;
-}
-.value {
-    font-size: 22px;
-    font-weight: 600;
-}
-.timer {
-    font-family: monospace;
-    font-size: 24px;
-    font-weight: 700;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("<div class='title'>🎱 Pool Table Live</div>", unsafe_allow_html=True)
+st.title("🎱 Pool Table Live")
 
 # --------------------------------------------------
-# 🧠 TIME HELPERS
+# 🧠 TIME PARSER (SAFE)
 # --------------------------------------------------
 def parse_utc(dt):
     if isinstance(dt, str):
-        return datetime.fromisoformat(dt.replace("Z", "")).replace(tzinfo=None)
-    return dt.replace(tzinfo=None)
+        return datetime.fromisoformat(dt.replace("Z", ""))
+    return dt
 
 # --------------------------------------------------
 # 🔁 HARD REFRESH EVERY 2 MINUTES
@@ -73,15 +35,20 @@ if datetime.utcnow() - st.session_state.last_refresh >= timedelta(minutes=2):
 # --------------------------------------------------
 # 🎱 FETCH RUNNING GAME
 # --------------------------------------------------
-game_res = supabase.table("games") \
-    .select("*") \
-    .eq("status", "running") \
-    .order("created_at", desc=True) \
-    .limit(1) \
-    .execute()
+try:
+    game_res = supabase.table("games") \
+        .select("*") \
+        .eq("status", "running") \
+        .order("created_at", desc=True) \
+        .limit(1) \
+        .execute()
+except Exception:
+    st.error("Unable to load gaming screen")
+    time.sleep(5)
+    st.rerun()
 
 if not game_res.data:
-    st.markdown("<div class='card'><div class='value'>No active pool game</div></div>", unsafe_allow_html=True)
+    st.info("No active pool game")
     time.sleep(10)
     st.rerun()
 
@@ -90,20 +57,19 @@ game = game_res.data[0]
 # --------------------------------------------------
 # 👤 FETCH CUSTOMER NAME
 # --------------------------------------------------
-customer = "—"
 order = supabase.table("orders") \
     .select("table_name") \
     .eq("id", game["order_id"]) \
     .single() \
     .execute()
 
-customer = order.data.get("table_name") or "—"
+customer_name = order.data.get("table_name") or "—"
 
 # --------------------------------------------------
 # ⏱ TIME CALCULATION (STATIC PER REFRESH)
 # --------------------------------------------------
 start_time = parse_utc(game["start_time"])
-now = datetime.utcnow().replace(tzinfo=None)
+now = datetime.utcnow()
 
 elapsed_seconds = max(0, int((now - start_time).total_seconds()))
 
@@ -121,26 +87,23 @@ rate_per_hour = rate_30 * 2
 amount = round((elapsed_seconds / 3600) * rate_per_hour, 2)
 
 # --------------------------------------------------
-# 📺 DISPLAY CARD
+# 📺 CENTERED DISPLAY (PURE STREAMLIT)
 # --------------------------------------------------
-st.markdown(f"""
-<div class="card">
-    <div class="value">👤 {customer}</div>
+left, center, right = st.columns([1, 2, 1])
 
-    <div class="label">🎱 Price / Hour</div>
-    <div class="value">₹ {rate_per_hour}</div>
+with center:
+    st.subheader(f"👤 {customer_name}")
 
-    <div class="label">🕒 Started At</div>
-    <div class="value">
-        {start_time.astimezone(IST).strftime("%I:%M %p")}
-    </div>
+    st.write("🎱 **Price / Hour**")
+    st.write(f"₹ {rate_per_hour}")
 
-    <div class="label">⏱ Time Elapsed</div>
-    <div class="timer">{elapsed_str}</div>
+    st.write("🕒 **Started At**")
+    st.write(start_time.astimezone(IST).strftime("%I:%M %p"))
 
-    <div class="label">💰 Total Spend</div>
-    <div class="value">₹ {amount}</div>
-</div>
-""", unsafe_allow_html=True)
+    st.write("⏱ **Time Elapsed**")
+    st.write(elapsed_str)
+
+    st.write("💰 **Total Spend**")
+    st.write(f"₹ {amount}")
 
 st.caption("Auto-refresh every 2 minutes")
