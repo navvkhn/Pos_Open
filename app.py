@@ -155,12 +155,16 @@ with st.sidebar.expander("📱 Customer QR Menu"):
 # ---- KITCHEN SCREEN ----
 with st.sidebar.expander("🍳 Kitchen Screen"):
     kitchen_url = f"{APP_URL}/?kitchen={tenant_name.replace(' ', '%20')}"
+    qr_img1 = generate_qr(kitchen_url)
+    st.image(qr_img1, caption="Scan to open Kitchen")
     st.code(kitchen_url)
     st.caption("Open this on kitchen tablet / TV")
 
 # ---- GAMING SCREEN ----
 with st.sidebar.expander("🎱 Gaming Screen"):
     gaming_url = f"{APP_URL}/?gaming={tenant_name.replace(' ', '%20')}"
+    qr_img2 = generate_qr(gaming_url)
+    st.image(qr_img2, caption="Scan to open Gaming Screen")
     st.code(gaming_url)
     st.caption("Open this near pool table")
 
